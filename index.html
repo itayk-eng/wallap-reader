@@ -751,12 +751,14 @@ function strutForceRows(R) {
     const s = R.struts.find(x => x.no === +no) || {}; const f = r.forces[no];
     const c = Math.cos((s.incl || 0) * Math.PI / 180);
     const perStrut = f.perStrut ?? (f.perM * (s.spacing || 1));
-    rows.push({ stage: r.stage, no: +no, perM: f.perM, perStrut, axial: perStrut / c, axialM: f.perM / c, s });
+    const k = DZ.mode === 'axis' ? 1 / c : 1;
+    rows.push({ stage: r.stage, no: +no, perM: f.perM, perStrut, axial: perStrut * k, axialM: f.perM * k, s });
   }
   // fall back to stage detail output if no summary table
   if (!rows.length) for (const k in R.results) for (const f of R.results[k].strutForces) {
     const s = R.struts.find(x => Math.abs(x.elev - f.elev) < 0.01) || {}; const c = Math.cos((s.incl || 0) * Math.PI / 180);
-    rows.push({ stage: +k, no: s.no, perM: f.perM, perStrut: f.perStrut, axial: f.perStrut / c, axialM: f.perM / c, s });
+    const kk = DZ.mode === 'axis' ? 1 / c : 1;
+    rows.push({ stage: +k, no: s.no, perM: f.perM, perStrut: f.perStrut, axial: f.perStrut * kk, axialM: f.perM * kk, s });
   }
   return rows;
 }
@@ -1332,7 +1334,7 @@ function renderOverview(el0) {
         <div><span>Water table</span><b>${el(st?.waterActive)}</b></div>
         ${K.F ? `<div><span>Min FoS (stage ${K.F.stage})</span><b>${K.F.fos.toFixed(2)}${target ? (K.F.fos >= target ? ' ✓' : ' ▼') : ''}</b></div>` : ''}
       </div>
-      ${R.struts.length ? `<h3 style="margin:16px 0 6px">Anchors</h3><div class="tscroll"><table class="compact"><thead><tr><th class="l">Row</th><th>Level</th><th>@<small>m</small></th><th>H max<small>${u.Fm}</small></th><th>T max<small>${u.F}</small></th></tr></thead><tbody>
+      ${R.struts.length ? `<h3 style="margin:16px 0 6px">Anchors</h3><div class="tscroll"><table class="compact"><thead><tr><th class="l">Row</th><th>Level</th><th>@<small>m</small></th><th>Max<small>${u.Fm}</small></th><th>Per anchor<small>${u.F}</small></th></tr></thead><tbody>
         ${R.struts.map(a => { const g = gov[a.no]; return `<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.spacing, 2)}</td><td>${g ? fF(g.perM, 2) : '–'}</td><td>${g ? fF(g.axial, 1) : '–'}</td></tr>`; }).join('')}
       </tbody></table></div>
       <p class="hint" style="margin:8px 0 0"><button type="button" class="link" data-goto="design">Choose anchor spacing and strands →</button></p>` : ''}
@@ -1379,7 +1381,7 @@ function renderAnchors(el0) {
         <div><span>Inclination</span><b>${fx(a.incl, 1)}°</b></div>
         <div><span>Free length</span><b>${fx(a.freeLength, 2)} m</b></div>
         <div><span>Prestress</span><b>${fF(a.prestress, 1)} ${u.F}</b></div>
-        <div><span>Along the anchor, per anchor</span><b>${g ? fF(g.axial, 1) + ' ' + u.F : '–'}</b></div>
+        <div><span>${DZ.mode === 'axis' ? 'Along the anchor, per anchor' : 'Per anchor (× spacing)'}</span><b>${g ? fF(g.axial, 1) + ' ' + u.F : '–'}</b></div>
         <div><span>Governing stage</span><b>${g ? g.stage : '–'}</b></div>
         <div><span>Tension allowed</span><b>${esc(a.tension)}</b></div>
       </div>
@@ -1387,9 +1389,9 @@ function renderAnchors(el0) {
     <div class="panel"><div class="panel-head"><h2>Wall elevation</h2><span class="hint">${L ? `Anchor rows along ${L} m of wall` : 'Anchor rows'}</span></div>${elevationSVG(R, gov, name)}</div>
   </div>
   <div class="panel">
-    <div class="panel-head"><h2>Anchor forces by stage</h2><span class="hint">Axial force = horizontal force ÷ cos(inclination)</span></div>
-    <div class="tscroll"><table><thead><tr><th class="l">Stage</th><th class="l">Strut</th><th>Level</th><th>Horizontal<small>${u.Fm}</small></th><th>Horizontal<small>${u.F}/anchor</small></th><th>Axial<small>${u.F}/anchor</small></th><th>Axial<small>${u.Fm}</small></th></tr></thead><tbody>
-    ${rows.map(r => `<tr class="${gov[r.no] && gov[r.no].stage === r.stage ? 'gov' : ''}"><td class="l">${r.stage}</td><td class="l">Strut ${r.no}</td><td>${el(r.s.elev)}</td><td>${fF(r.perM, 2)}</td><td>${fF(r.perStrut, 2)}</td><td>${fF(r.axial, 2)}</td><td>${fF(r.axialM, 2)}</td></tr>`).join('')}
+    <div class="panel-head"><h2>Strut forces by stage</h2><span class="hint">${DZ.mode === 'axis' ? 'Along the anchor = report force ÷ cos(inclination)' : 'Force from the report; per anchor = force × spacing'}</span></div>
+    <div class="tscroll"><table><thead><tr><th class="l">Stage</th><th class="l">Strut</th><th>Level</th><th>Force<small>${u.Fm}</small></th><th>Per anchor<small>${u.F}</small></th>${DZ.mode === 'axis' ? `<th>Along anchor<small>${u.F}/anchor</small></th><th>Along anchor<small>${u.Fm}</small></th>` : ''}</tr></thead><tbody>
+    ${rows.map(r => `<tr class="${gov[r.no] && gov[r.no].stage === r.stage ? 'gov' : ''}"><td class="l">${r.stage}</td><td class="l">Strut ${r.no}</td><td>${el(r.s.elev)}</td><td>${fF(r.perM, 2)}</td><td>${fF(r.perStrut, 2)}</td>${DZ.mode === 'axis' ? `<td>${fF(r.axial, 2)}</td><td>${fF(r.axialM, 2)}</td>` : ''}</tr>`).join('')}
     </tbody></table></div>
     <p class="hint" style="margin:8px 0 0">Highlighted rows are the governing force for each anchor.</p>
   </div>`;
@@ -1421,7 +1423,9 @@ function elevationSVG(R, gov, name) {
 }
 
 // ---------- ANCHOR DESIGN
-const DZ = { strandBreak: 26.5, ratio: 0.6, factor: 1.0 };   // strandBreak in tonnes
+// mode 'report': the force in the WALLAP table is used as the anchor force as written (default)
+// mode 'axis': it is treated as a horizontal component and divided by cos(inclination)
+const DZ = { strandBreak: 26.5, ratio: 0.6, factor: 1.0, mode: 'report' };   // strandBreak in tonnes
 try { const g = JSON.parse(localStorage.getItem('wr-dz') || 'null'); if (g && g.strandBreak > 0) Object.assign(DZ, g); } catch (e) {}
 const dzRows = {};
 function dzKey(R) { return [R.meta.job, R.meta.runId, R.meta.title].join('|'); }
@@ -1429,14 +1433,15 @@ function dzSave(R) { try { localStorage.setItem('wr-dz', JSON.stringify(DZ)); lo
 function dzCalc(R, a, g, s, n) {
   if (!g || !(s > 0)) return null;
   const c = Math.cos((a.incl || 0) * Math.PI / 180);
-  const Hreq = g.perM * DZ.factor;                 // horizontal per m the row must carry
-  const Tm = Hreq / c;                              // along the anchor, per m
+  const conv = DZ.mode === 'axis' ? c : 1;
+  const Hreq = g.perM * DZ.factor;                 // force per m from the report the row must carry
+  const Tm = Hreq / conv;                           // force in the anchor, per m
   const Pa = DZ.strandBreak * DZ.ratio;             // allowable per strand
   const T = Tm * s;                                 // force per anchor
   const nMin = Math.max(1, Math.ceil(T / Pa - 1e-9));
   const nn = n ?? nMin, cap = nn * Pa;
   const s0 = a.spacing || 1, Lw = R.options.wallLength;
-  return { c, Hreq, Tm, Pa, T, nMin, n: nn, cap, util: T / cap, Hprov: cap * c / s, sMax: Math.floor(nn * Pa / Tm * 20 + 1e-9) / 20,
+  return { c, Hreq, Tm, Pa, T, nMin, n: nn, cap, util: T / cap, Hprov: cap * conv / s, sMax: Math.floor(nn * Pa / Tm * 20 + 1e-9) / 20,
     lock: a.prestress != null ? a.prestress / s0 * s : null, count: Lw ? Math.ceil(Lw / s - 1e-9) : null, stage: g.stage };
 }
 function dzGet(R) {
@@ -1475,6 +1480,7 @@ function renderDesign(el0) {
       <label for="dz-break"><span>Breaking load per strand <span class="u">${u.F}</span></span><input id="dz-break" type="number" step="0.1" min="1" value="${(DZ.strandBreak * u.f).toFixed(1)}"></label>
       <label for="dz-ratio"><span>Allowable ratio <span class="u">× breaking</span></span><input id="dz-ratio" type="number" step="0.01" min="0.1" max="1" value="${DZ.ratio.toFixed(2)}"></label>
       <div class="dz-derived"><span>Allowable per strand</span><b id="dz-pa"></b></div>
+      <div class="sel"><span id="dz-mode-l">The force in the report is</span><div class="seg" role="group" aria-labelledby="dz-mode-l"><button type="button" data-mode="report" aria-pressed="${DZ.mode !== 'axis'}">The anchor force</button><button type="button" data-mode="axis" aria-pressed="${DZ.mode === 'axis'}">Horizontal, ÷ cos α</button></div></div>
       <label for="dz-factor"><span>Factor on consultant force</span><input id="dz-factor" type="number" step="0.05" min="0.5" max="3" value="${DZ.factor.toFixed(2)}"></label>
     </div>
     <p class="hint" style="margin:10px 0 0">Defaults are a 0.6" strand (Ø15.2 mm, 140 mm², 1860 MPa, breaking load 26.5 t) used at 0.60 of breaking load. Set them to your project specification.</p>
@@ -1506,8 +1512,8 @@ function renderDesign(el0) {
     for (const a of R.struts) {
       const g = gov[a.no]; if (!g) continue;
       const r = rows[a.no], c = dzCalc(R, a, g, r.s, r.n);
-      q('dreq-' + a.no).innerHTML = `${fF(c.Hreq, 2)}<span>${uu.Fm} horizontal</span>`;
-      q('dreqs-' + a.no).innerHTML = `${fF(c.Tm, 2)} ${uu.Fm} along the anchor · governing stage ${g.stage}${DZ.factor !== 1 ? ` · includes ×${DZ.factor.toFixed(2)}` : ''}`;
+      q('dreq-' + a.no).innerHTML = `${fF(c.Hreq, 2)}<span>${uu.Fm}${DZ.mode === 'axis' ? ' horizontal' : ''}</span>`;
+      q('dreqs-' + a.no).innerHTML = `${DZ.mode === 'axis' ? `${fF(c.Tm, 2)} ${uu.Fm} along the anchor (÷ cos ${fx(a.incl || 0, 0)}°)` : 'Used as the force in the anchor'} · governing stage ${g.stage}${DZ.factor !== 1 ? ` · includes ×${DZ.factor.toFixed(2)}` : ''}`;
       const ok = c.util <= 1 + 1e-9;
       q('dout-' + a.no).innerHTML = `
         <div class="verdict ${ok ? 'good' : 'crit'}">${ok ? '✓ Carries the consultant’s force' : '✗ Not enough capacity'}</div>
@@ -1516,7 +1522,7 @@ function renderDesign(el0) {
           <div><span>Force per anchor</span><b>${fF(c.T, 2)} ${uu.F}</b></div>
           <div><span>Anchor capacity (${c.n} × ${fF(c.Pa, 2)})</span><b>${fF(c.cap, 2)} ${uu.F}</b></div>
           <div><span>Capacity used</span><b>${Math.round(c.util * 100)}%</b></div>
-          <div><span>Provided per m, horizontal</span><b class="${ok ? '' : 'bad'}">${fF(c.Hprov, 2)} ${ok ? '≥' : '<'} ${fF(c.Hreq, 2)} ${uu.Fm}</b></div>
+          <div><span>Provided per m${DZ.mode === 'axis' ? ', horizontal' : ''}</span><b class="${ok ? '' : 'bad'}">${fF(c.Hprov, 2)} ${ok ? '≥' : '<'} ${fF(c.Hreq, 2)} ${uu.Fm}</b></div>
           <div><span>Fewest strands at ${r.s.toFixed(2)} m</span><b>${c.nMin}</b></div>
           <div><span>Widest spacing with ${c.n} strands</span><b>${c.sMax.toFixed(2)} m</b></div>
           ${c.lock != null ? `<div><span>Lock-off load (consultant prestress)</span><b>${fF(c.lock, 1)} ${uu.F} · ${Math.round(c.lock / c.cap * 100)}%</b></div>` : ''}
@@ -1543,6 +1549,7 @@ function renderDesign(el0) {
   g('dz-break', v => { DZ.strandBreak = v / U().f; });
   g('dz-ratio', v => { if (v <= 1) DZ.ratio = v; });
   g('dz-factor', v => { DZ.factor = v; });
+  el0.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { DZ.mode = b.dataset.mode; dzSave(R); render(); });
   update();
 }
 
