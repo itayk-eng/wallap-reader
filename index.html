@@ -544,6 +544,7 @@ function parseWallap(text) {
       continue;
     }
     if (inSummary && /^Strut forces at each stage/.test(l)) {
+      R.summary.strutHoriz = /horizontal/i.test(l);
       // WALLAP prints this table in blocks of up to three struts ("--- Strut no. 1 --- ... no. 3"), then
       // "--- Strut no. 4 --- ..." and so on, sometimes across a page break. Each block has its own header.
       let cols = []; const allCols = []; const byStage = new Map();
@@ -600,6 +601,7 @@ function parseWallap(text) {
     st.stage = s.no; st.desc = s.desc;
     R.derived.stageState.push(st);
   }
+  if (R.summary.strutHoriz == null) R.summary.strutHoriz = Object.values(R.results).some(r => r.strutForces.some(f => f.perMInclined != null));
   if (!R.stages.length) R.warnings.push('No construction stages found. Is this a WALLAP report?');
   if (!Object.keys(R.results).length && !R.summary.envelope.length) R.warnings.push('No bending moment results found in this report.');
   return R;
@@ -857,9 +859,21 @@ function sectionSVG(R, stageNo, opts = {}) {
   const reach = Math.max(0, ...R.struts.map(s => (s.freeLength || 0) * Math.cos((s.incl || 0) * Math.PI / 180)));
   const surReach = Math.max(0, ...R.surcharges.filter(s => s.side === 'active').map(s => s.dist + (s.width || 4)));
   const H = yTop - yBot;
-  const xL = -Math.max(0.55 * H, reach + 1.5, surReach + 1.5);
+  let xL = -Math.max(0.55 * H, reach + 1.5, surReach + 1.5);
   const xR = Math.max(0.42 * H, 6);
   const W = compact ? 400 : 960, ml = compact ? 8 : 18, mr = compact ? 58 : 170;
+  const showIncl = !!R.summary.strutHoriz;
+  if (!compact && opts.forces) {   // make room on the left for the strut labels
+    let need = xL;
+    for (const a of R.struts) {
+      const f = opts.forces[a.no]; if (!f) continue;
+      const ca = Math.cos((a.incl || 0) * Math.PI / 180);
+      const chars = 14 + fF(f.perM, 2).length + (showIncl && a.incl ? 22 + fF(f.perM / ca, 2).length : 0);
+      const fr = (100 + chars * 7.4) * ca / (W - ml - mr);
+      need = Math.min(need, -(fr * xR / (1 - fr)) - 0.5);
+    }
+    xL = need;
+  }
   const mt = opts.title ? (compact ? 52 : 70) : (compact ? 20 : 26), mb = compact ? 28 : 34;
   const s = (W - ml - mr) / (xR - xL);
   const Hpx = H * s + mt + mb;
@@ -931,7 +945,8 @@ function sectionSVG(R, stageNo, opts = {}) {
     const tx = X(0) - dpx * ca0 - 7 * sa0, tyl = Y(a.elev) + dpx * sa0 - 7 * ca0;
     const rot = `rotate(${-(a.incl || 0)} ${tx} ${tyl})`;
     if (!on) { out.push(`<text class="anchor-label ghost" x="${tx}" y="${tyl}" text-anchor="end" transform="${rot}">Strut ${a.no} (not yet installed)</text>`); continue; }
-    out.push(`<text class="anchor-label" x="${tx}" y="${tyl}" text-anchor="end" transform="${rot}">Strut ${a.no}${f ? `: ${fF(f.perM, 2)} ${u.Fm}` : ''}</text>`);
+    const incl = showIncl && f && a.incl ? `<tspan class="incl">(${fF(f.perM / ca0, 2)} ${u.Fm} INCLINED)</tspan><tspan dx="9">` : '<tspan>';
+    out.push(`<text class="anchor-label" x="${tx}" y="${tyl}" text-anchor="end" transform="${rot}">${incl}Strut ${a.no}${f ? `: ${fF(f.perM, 2)} ${u.Fm}` : ''}</tspan></text>`);
     // angle between the horizontal and the anchor, marked at the wall
     if (a.incl) {
       const x0 = X(0), y0 = Y(a.elev), rp = 40;
@@ -1018,7 +1033,7 @@ function sectionSVG(R, stageNo, opts = {}) {
     .wall{stroke:var(--wall);stroke-width:${compact ? 4 : 7};stroke-linecap:butt}
     .anchor line{stroke:var(--anchor);stroke-width:${compact ? 1.8 : 2.5}} .anchor .bond{stroke-width:${compact ? 4 : 6};stroke-opacity:.45;stroke-linecap:round} .anchor rect{fill:var(--anchor)}
     .anchor.ghost line,.anchor.ghost rect{stroke:var(--muted);fill:var(--muted);stroke-dasharray:4 4;opacity:.6}
-    .anchor-label{fill:var(--anchor);font-size:13px;font-weight:700;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label.ghost{fill:var(--muted);font-weight:400}
+    .anchor-label{fill:var(--anchor);font-size:13px;font-weight:700;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label .incl{fill:var(--ink);font-size:12px;font-weight:600} .anchor-label.ghost{fill:var(--muted);font-weight:400}
     .anchor-sub{fill:var(--ink);font-size:12px;font-family:var(--font-mono);paint-order:stroke;stroke:var(--soil-2);stroke-width:3px}
     .ang line,.ang path{stroke:var(--ink);stroke-width:1.1;fill:none} .ang text{fill:var(--ink);font-size:12px;font-weight:600;font-family:var(--font-mono);paint-order:stroke;stroke:var(--soil-2);stroke-width:3px}
     .sur line{stroke:var(--ink-2);stroke-width:1.2} .sur path{fill:var(--ink-2)} .sur text{fill:var(--ink);font-size:12px} .sur.ghost{opacity:.35}
@@ -1319,7 +1334,7 @@ function renderOverview(el0) {
     <div class="panel">
       <div class="panel-head"><h2>Final section and anchors</h2><span class="hint">Stage ${lastNo ?? '–'}: ${esc(st?.desc || '')}</span>${R.struts.length ? quickExp('anchors') : ''}</div>
       <div class="drawing">${sectionSVG(R, lastNo, { forces: gov, title: name, subtitle: `Final section · stage ${lastNo ?? ''} · strut levels and maximum strut forces (horizontal, per m)` })}</div>
-      <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i class="dash" style="border-color:var(--water)"></i>Water table</span>${R.struts.length ? `<span><i style="border-color:var(--anchor)"></i>Strut: maximum horizontal force per m of wall from the report; angle from the horizontal</span>` : ''}</div>
+      <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i class="dash" style="border-color:var(--water)"></i>Water table</span>${R.struts.length ? `<span><i style="border-color:var(--anchor)"></i>Strut: maximum horizontal force per m of wall from the report${R.summary.strutHoriz ? '; in brackets the force along the anchor (INCLINED)' : ''}; angle from the horizontal</span>` : ''}</div>
     </div>
     <div class="panel">
       <h3 style="margin-bottom:6px">Final section</h3>
@@ -1365,7 +1380,7 @@ function renderAnchors(el0) {
   <div class="panel">
     <div class="panel-head"><h2>${esc(name)} · anchor layout</h2><span class="hint">Each anchor shows its maximum force from the consultant's report</span>${quickExp('anchors')}</div>
     <div class="drawing">${sectionSVG(R, last, { forces: gov, title: name, subtitle: 'Strut layout · maximum force per strut from the WALLAP report (horizontal, per m of wall)' })}</div>
-    <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i style="border-color:var(--anchor)"></i>Strut: maximum horizontal force per m of wall from the report; angle from the horizontal</span></div>
+    <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i style="border-color:var(--anchor)"></i>Strut: maximum horizontal force per m of wall from the report${R.summary.strutHoriz ? '; in brackets the force along the anchor (INCLINED)' : ''}; angle from the horizontal</span></div>
     <p class="hint" style="margin:8px 0 0"><button type="button" class="link" data-goto="export">Export at 1:100 (DXF / PDF) →</button></p>
   </div>
   <div class="anchors-grid">${R.struts.map(a => { const g = gov[a.no]; const inst = R.stages.find(s => new RegExp('(strut|anchor) no\\.\\s*' + a.no + '\\b', 'i').test(s.desc) && /install/i.test(s.desc)); return `
@@ -1608,9 +1623,13 @@ function exportModel(R, kind, scale) {
     unitTxt = `diagram scale 1 cm = ${diag.perCm} ${diag.unit} at 1:${scale}`;
   } else {
     const reach = Math.max(2, ...R.struts.map(a => (a.freeLength || 6) * 1.35 * Math.cos((a.incl || 0) * Math.PI / 180)));
-    xmin = -(reach + 1.2); xmax = 4.5;
+    // room for the labels along each strut (main label plus the bracketed inclined force)
+    const lab = Math.max(0, ...R.struts.map(a => { const g = gov[a.no]; if (!g) return 0; const ca = Math.cos((a.incl || 0) * Math.PI / 180);
+      const w1 = textWidth(`Strut ${a.no}: ${fx(g.perM * f, 2)} ${Fm}`) * 0.3 * q / 0.718, w2 = R.summary.strutHoriz && a.incl ? textWidth(`(${fx(g.perM * f / ca, 2)} ${Fm} INCLINED)`) * 0.25 * q / 0.718 + 0.35 * q : 0;
+      return (2.6 * q + w1 + w2) * ca; }));
+    xmin = -(Math.max(reach, lab) + 1.2); xmax = 4.5;
     title = 'Section and struts, final stage' + (lastNo != null ? ' ' + lastNo : '');
-    summary = 'maximum strut forces from the WALLAP report (horizontal, per m of wall)';
+    summary = 'maximum strut forces from the WALLAP report (horizontal, per m of wall)' + (R.summary.strutHoriz ? '; force along the anchor in brackets (INCLINED)' : '');
   }
   // wall, ground, water
   line('WLP-WALL', [[0, top], [0, toe]]);
@@ -1644,7 +1663,12 @@ function exportModel(R, kind, scale) {
       }
       const g = gov[a.no];
       const d = deg ? 2.6 * q : 0.4 * q, off = 0.16 * q;   // on top of the strut, clear of the angle mark
-      text('WLP-ANCHOR', -d * ca - sa * off, a.elev - d * sa + ca * off, `Strut ${a.no}: ${g ? fx(g.perM * f, 2) + ' ' + Fm : 'no force in report'}`, 0.3 * q, 'right', deg);
+      const main = `Strut ${a.no}: ${g ? fx(g.perM * f, 2) + ' ' + Fm : 'no force in report'}`;
+      text('WLP-ANCHOR', -d * ca - sa * off, a.elev - d * sa + ca * off, main, 0.3 * q, 'right', deg);
+      if (g && R.summary.strutHoriz && deg) {
+        const d2 = d + textWidth(main) * 0.3 * q / 0.718 + 0.35 * q;
+        text('WLP-TEXT', -d2 * ca - sa * off, a.elev - d2 * sa + ca * off, `(${fx(g.perM * f / ca, 2)} ${Fm} INCLINED)`, 0.25 * q, 'right', deg);
+      }
     } else {
       line('WLP-ANCHOR', [[0, a.elev], [-0.7 * q * ca, a.elev - 0.7 * q * sa]]);
     }
@@ -1708,7 +1732,7 @@ function exportModel(R, kind, scale) {
     let ty = yb - 1.55 * q;
     for (const a of R.struts) {
       const g = gov[a.no];
-      text('WLP-TEXT', xmin, ty, `Strut ${a.no}   ${el(a.elev)}   ${fx(a.incl || 0, 0)}°   @ ${fx(a.spacing, 2)} m   L free ${fx(a.freeLength, 2)} m   prestress ${fx((a.prestress || 0) * f, 1)} ${F}   max ${g ? fx(g.perM * f, 2) + ' ' + Fm + ' (stage ' + g.stage + ')' : '-'}`, Hs);
+      text('WLP-TEXT', xmin, ty, `Strut ${a.no}   ${el(a.elev)}   ${fx(a.incl || 0, 0)}°   @ ${fx(a.spacing, 2)} m   L free ${fx(a.freeLength, 2)} m   prestress ${fx((a.prestress || 0) * f, 1)} ${F}   max ${g ? fx(g.perM * f, 2) + ' ' + Fm + (R.summary.strutHoriz && a.incl ? ' horizontal, ' + fx(g.perM * f / Math.cos(a.incl * Math.PI / 180), 2) + ' ' + Fm + ' inclined' : '') + ' (stage ' + g.stage + ')' : '-'}`, Hs);
       ty -= 0.38 * q;
     }
   }
