@@ -208,7 +208,7 @@ table.mx td { padding: 0; }
 .exp-opts legend { font-size: 12px; font-weight: 500; color: var(--ink-2); padding: 0; margin-bottom: 6px; }
 label.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 label.chk input { accent-color: var(--accent); width: 16px; height: 16px; }
-label.sel { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 500; color: var(--ink-2); }
+.sel { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 500; color: var(--ink-2); }
 select { font: 500 13px var(--font-body); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); max-width: 100%; }
 select:focus-visible, label.chk input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .exp-btns { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -541,33 +541,35 @@ function parseWallap(text) {
       continue;
     }
     if (inSummary && /^Strut forces at each stage/.test(l)) {
-      // column headers: "--- Strut no. N ---" and "at elev. X"
-      const cols = [];
+      // WALLAP prints this table in blocks of up to three struts ("--- Strut no. 1 --- ... no. 3"), then
+      // "--- Strut no. 4 --- ..." and so on, sometimes across a page break. Each block has its own header.
+      let cols = []; const allCols = []; const byStage = new Map();
       for (k = k + 1; k < lines.length; k++) {
         const r = lines[k];
-        if (/Strut no\./.test(r)) { for (const x of r.matchAll(/-*\s*Strut no\.\s*(\d+)\s*-*/g)) cols.push({ no: +x[1], start: x.index, end: x.index + x[0].length }); continue; }
+        if (!r.trim() || /^Summary of results/.test(r)) continue;
+        if (/Strut no\./.test(r)) { cols = []; for (const x of r.matchAll(/-*\s*Strut no\.\s*(\d+)\s*-*/g)) { const c = { no: +x[1], start: x.index, end: x.index + x[0].length }; cols.push(c); allCols.push(c); } continue; }
         if (/at elev\./.test(r)) { let c = 0; for (const x of r.matchAll(new RegExp('at elev\\.\\s*(' + NUM + ')', 'g'))) { if (cols[c]) cols[c].elev = num(x[1]); c++; } continue; }
-        if (/t\/m run|t\/strut|kN\/m/.test(r)) continue;
+        if (/\/m run|\/strut|kN\/m/.test(r) || /^\s*(Stage|no\.)\s*$/.test(r)) continue;
         const mm2 = r.match(/^\s*(\d+)\s+(.*)$/);
         if (mm2 && cols.length) {
-          const row = { stage: +mm2[1], forces: {} };
-          const re = new RegExp(NUM, 'g'); let x; const body = r;
-          const pieces = []; while ((x = re.exec(body))) pieces.push({ v: num(x[0]), end: x.index + x[0].length, start: x.index });
+          const st = +mm2[1];
+          let row = byStage.get(st); if (!row) { row = { stage: st, forces: {} }; byStage.set(st, row); }
+          const re = new RegExp(NUM, 'g'); let x;
+          const pieces = []; while ((x = re.exec(r))) pieces.push({ v: num(x[0]), end: x.index + x[0].length, start: x.index });
           pieces.shift(); // stage number
-          // pair values into columns by position: each strut column spans [start, end]; two values each (per m, per strut)
           for (const p of pieces) {
             let best = null, bd = 1e9;
             for (const c of cols) { const d = p.end < c.start ? c.start - p.end : p.start > c.end + 2 ? p.start - c.end : 0; if (d < bd) { bd = d; best = c; } }
             if (!best) continue;
             const f = row.forces[best.no] || (row.forces[best.no] = {});
-            if (f.perM == null) f.perM = p.v; else f.perStrut = p.v;
+            if (f.perM == null) f.perM = p.v; else if (f.perStrut == null) f.perStrut = p.v;
           }
-          R.summary.strutForces.push(row); continue;
+          continue;
         }
-        if (!r.trim()) { if (R.summary.strutForces.length) break; continue; }
-        if (/^[A-Z]/.test(r)) { k--; break; }
+        if (/^[A-Z]/.test(r) && !/^Stage/.test(r)) { k--; break; }
       }
-      R.summary.strutCols = cols.map(c => ({ no: c.no, elev: c.elev }));
+      R.summary.strutForces = [...byStage.values()].sort((a, b) => a.stage - b.stage);
+      R.summary.strutCols = allCols.map(c => ({ no: c.no, elev: c.elev }));
       continue;
     }
   }
@@ -782,7 +784,7 @@ function keyNumbers(R) {
   if (R.summary.stageDisp.length) { const d = argmax(R.summary.stageDisp, s => Math.max(Math.abs(s.dMax), Math.abs(s.dMin))); o.D = { v: Math.abs(d.dMax) >= Math.abs(d.dMin) ? d.dMax : d.dMin, y: Math.abs(d.dMax) >= Math.abs(d.dMin) ? d.dMaxElev : d.dMinElev, stage: d.stage }; }
   else if (env.length) { const d = argmax(env, e => Math.max(Math.abs(e.dMax), Math.abs(e.dMin))); o.D = { v: d.dMax, y: d.y }; }
   const sf = strutForceRows(R);
-  if (sf.length) { o.A = argmax(sf, r => r.axial); }
+  if (sf.length) { o.A = argmax(sf, r => r.perM); }
   const st = R.summary.stability.length ? R.summary.stability : Object.values(R.results).map(r => r.stability).filter(Boolean);
   const withF = st.filter(s => s.fos != null);
   if (withF.length) o.F = withF.reduce((b, x) => (x.fos < b.fos ? x : b));
@@ -814,7 +816,7 @@ function render() {
       ${K.Mneg ? kpi('Max moment (−)', fF(K.Mneg.v), u.M, `at ${el(K.Mneg.y)}${K.Mneg.stage ? ' · stage ' + K.Mneg.stage : ''}`) : ''}
       ${K.V ? kpi('Max shear', fF(Math.abs(K.V.v)), u.Fm, `at ${el(K.V.y)}${K.V.stage ? ' · stage ' + K.V.stage : ''}`) : ''}
       ${K.D ? kpi('Max displacement', mm(K.D.v), 'mm', `at ${el(K.D.y)}${K.D.stage ? ' · stage ' + K.D.stage : ''}`) : ''}
-      ${K.A ? kpi('Anchor force (axial)', fF(K.A.axial), u.F + '/anchor', `A${K.A.no} at ${el(K.A.s.elev)} · stage ${K.A.stage}`) : ''}
+      ${K.A ? kpi('Max strut force', fF(K.A.perM, 2), u.Fm, `Strut ${K.A.no} at ${el(K.A.s.elev)} · stage ${K.A.stage}`) : ''}
       ${K.F ? kpi('Min factor of safety', K.F.fos.toFixed(2), '', `stage ${K.F.stage} ${fosChip}`) : ''}
     </div>
   </section>
@@ -921,13 +923,15 @@ function sectionSVG(R, stageNo, opts = {}) {
     out.push(`<g class="${on ? 'anchor' : 'anchor ghost'}"><line x1="${X(0)}" y1="${Y(a.elev)}" x2="${X(x1)}" y2="${Y(y1)}"/><line class="bond" x1="${X(x1)}" y1="${Y(y1)}" x2="${X(bx)}" y2="${Y(a.elev + bx * Math.tan(ang))}"/><rect x="${X(0) - (compact ? 2 : 3)}" y="${Y(a.elev) - (compact ? 5 : 7)}" width="${compact ? 4 : 6}" height="${compact ? 10 : 14}"/></g>`);
     if (compact) continue;
     const f = forces[a.no];
-    const tx = X(x1 * 0.52), tyl = Y(a.elev - L * 0.52 * Math.sin(ang));
+    const tx = X(x1 * 0.55), tyl = Y(a.elev - L * 0.55 * Math.sin(ang));
     const rot = `rotate(${-(a.incl || 0)} ${tx} ${tyl})`;
-    if (!on) { out.push(`<text class="anchor-label ghost" x="${tx}" y="${tyl - 9}" text-anchor="middle" transform="${rot}">A${a.no} (not yet installed)</text>`); continue; }
-    if (f) {
-      out.push(`<text class="anchor-label" x="${tx}" y="${tyl - 9}" text-anchor="middle" transform="${rot}">A${a.no} · T = ${fF(f.axial, 1)} ${u.F}/anchor</text>`);
-      out.push(`<text class="anchor-sub" x="${tx}" y="${tyl + 17}" text-anchor="middle" transform="${rot}">H = ${fF(f.perM, 2)} ${u.Fm}${f.stage != null ? ' · stage ' + f.stage : ''}</text>`);
-    } else out.push(`<text class="anchor-label" x="${tx}" y="${tyl - 9}" text-anchor="middle" transform="${rot}">A${a.no}</text>`);
+    if (!on) { out.push(`<text class="anchor-label ghost" x="${tx}" y="${tyl - 7}" text-anchor="middle" transform="${rot}">Strut ${a.no} (not yet installed)</text>`); continue; }
+    out.push(`<text class="anchor-label" x="${tx}" y="${tyl + 16}" text-anchor="middle" transform="${rot}">Strut ${a.no}${f ? `: ${fF(f.perM, 2)} ${u.Fm}` : ''}</text>`);
+    // angle between the horizontal and the anchor, marked at the wall
+    if (a.incl) {
+      const x0 = X(0), y0 = Y(a.elev), rp = 40;
+      out.push(`<g class="ang"><line x1="${x0}" y1="${y0}" x2="${x0 - 58}" y2="${y0}"/><path d="M${x0 - rp} ${y0} A${rp} ${rp} 0 0 0 ${x0 - rp * Math.cos(ang)} ${y0 + rp * Math.sin(ang)}"/><text x="${x0 - rp - 4}" y="${y0 + rp * Math.sin(ang / 2) + 4}" text-anchor="end">${fx(a.incl, a.incl % 1 ? 1 : 0)}°</text></g>`);
+    }
   }
   if (!compact && !diag) {
     const dimX = X(Math.min(2.2, xR * 0.35));
@@ -978,13 +982,13 @@ function sectionSVG(R, stageNo, opts = {}) {
   const levels = [{ y: top, t: 'Top of wall' }];
   if (Math.abs(st.glActive - top) > 0.01) levels.push({ y: st.glActive, t: 'Retained ground' });
   if (st.glPassive < top - 0.01) levels.push({ y: st.glPassive, t: 'Excavation level' });
-  for (const a of R.struts) if (st.struts.includes(a.no) || opts.ghosts) levels.push({ y: a.elev, t: `Anchor A${a.no}`, c: 'anchor-t' });
+  for (const a of R.struts) if (st.struts.includes(a.no) || opts.ghosts) levels.push({ y: a.elev, t: `Strut ${a.no}`, c: 'anchor-t' });
   levels.push({ y: toe, t: 'Toe of wall' });
   if (st.waterActive != null && st.waterActive >= yBot) levels.push({ y: st.waterActive, t: 'Water table', c: 'water-t' });
   if (st.waterPassive != null && st.waterPassive !== st.waterActive && st.waterPassive >= yBot) levels.push({ y: st.waterPassive, t: 'Water (exc. side)', c: 'water-t' });
   if (!compact && lowB != null && lowB >= yBot) levels.push({ y: lowB, t: 'Rigid boundary' });
   levels.sort((a, b) => b.y - a.y);
-  let lastY = -1e9; const lx = W - mr + (compact ? 8 : 14), gap = compact ? 13 : 26;
+  let lastY = -1e9; const lx = W - mr + (compact ? 8 : 14), gap = compact ? 13 : 30;
   for (const l of levels) {
     const py = Y(l.y); const ly = Math.max(py, lastY + gap); lastY = ly;
     out.push(`<line class="leader" x1="${X(xR)}" x2="${lx - 4}" y1="${py}" y2="${py}"/><line class="leader" x1="${lx - 4}" x2="${lx}" y1="${py}" y2="${compact ? ly - 3 : ly - 4}"/>`);
@@ -1011,6 +1015,7 @@ function sectionSVG(R, stageNo, opts = {}) {
     .anchor.ghost line,.anchor.ghost rect{stroke:var(--muted);fill:var(--muted);stroke-dasharray:4 4;opacity:.6}
     .anchor-label{fill:var(--anchor);font-size:13px;font-weight:700;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label.ghost{fill:var(--muted);font-weight:400}
     .anchor-sub{fill:var(--ink);font-size:12px;font-family:var(--font-mono);paint-order:stroke;stroke:var(--soil-2);stroke-width:3px}
+    .ang line,.ang path{stroke:var(--ink);stroke-width:1.1;fill:none} .ang text{fill:var(--ink);font-size:12px;font-weight:600;font-family:var(--font-mono);paint-order:stroke;stroke:var(--soil-2);stroke-width:3px}
     .sur line{stroke:var(--ink-2);stroke-width:1.2} .sur path{fill:var(--ink-2)} .sur text{fill:var(--ink);font-size:12px} .sur.ghost{opacity:.35}
     .dim line,.dim path{stroke:var(--ink-2);stroke-width:1;fill:none} .dim text{fill:var(--ink);font-size:12px}
     .leader{stroke:var(--muted);stroke-width:.8}
@@ -1084,7 +1089,7 @@ function renderSection(el0) {
         <div><span>Water table (ret. / exc.)</span><b>${el(st?.waterActive)} / ${el(st?.waterPassive)}</b></div>
         ${R.options.lowerBoundary != null ? `<div><span>Rigid lower boundary</span><b>${el(R.options.lowerBoundary)}</b></div>` : ''}
       </div>
-      ${anchorsOn.length ? `<h3 style="margin:14px 0 6px">Anchors in this stage</h3><div class="keys">${anchorsOn.map(a => `<div><span>A${a.no} at ${el(a.elev)}, ${a.incl ?? 0}°</span><b>${forces[a.no] ? fF(forces[a.no].axial) + ' ' + u.F : 'no force output'}</b></div>`).join('')}</div>` : ''}
+      ${anchorsOn.length ? `<h3 style="margin:14px 0 6px">Anchors in this stage</h3><div class="keys">${anchorsOn.map(a => `<div><span>Strut ${a.no} at ${el(a.elev)}, ${a.incl ?? 0}°</span><b>${forces[a.no] ? fF(forces[a.no].perM, 2) + ' ' + u.Fm : 'no force output'}</b></div>`).join('')}</div>` : ''}
       ${st?.surcharges.length ? `<h3 style="margin:14px 0 6px">Surcharge</h3><div class="keys">${R.surcharges.filter(s => st.surcharges.includes(s.no)).map(s => `<div><span>No. ${s.no}, ${s.dist} m from wall</span><b>${fF(s.qNear, 2)} ${u.P}</b></div>`).join('')}</div>` : ''}
     </div>
   </div>${notes}`;
@@ -1163,7 +1168,7 @@ function chartLevels(R, stageNo) {
   const st = R.derived.stageState.find(s => s.stage === stageNo);
   const lv = [];
   if (st && st.glPassive < R.derived.wallTop - 0.01) lv.push({ y: st.glPassive, t: 'Exc. ' + st.glPassive.toFixed(2) });
-  for (const a of R.struts) if (!st || st.struts.includes(a.no)) lv.push({ y: a.elev, t: 'A' + a.no, c: 'anchor-t' });
+  for (const a of R.struts) if (!st || st.struts.includes(a.no)) lv.push({ y: a.elev, t: 'S' + a.no, c: 'anchor-t' });
   if (R.wall.toe != null) lv.push({ y: R.wall.toe, t: 'Toe' });
   return lv;
 }
@@ -1308,8 +1313,8 @@ function renderOverview(el0) {
   <div class="two">
     <div class="panel">
       <div class="panel-head"><h2>Final section and anchors</h2><span class="hint">Stage ${lastNo ?? '–'}: ${esc(st?.desc || '')}</span>${R.struts.length ? quickExp('anchors') : ''}</div>
-      <div class="drawing">${sectionSVG(R, lastNo, { forces: gov, title: name, subtitle: `Final section · stage ${lastNo ?? ''} · anchor levels and maximum anchor forces` })}</div>
-      <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i class="dash" style="border-color:var(--water)"></i>Water table</span>${R.struts.length ? `<span><i style="border-color:var(--anchor)"></i>Anchor: T along anchor, H horizontal per m</span>` : ''}</div>
+      <div class="drawing">${sectionSVG(R, lastNo, { forces: gov, title: name, subtitle: `Final section · stage ${lastNo ?? ''} · strut levels and maximum strut forces (horizontal, per m)` })}</div>
+      <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i class="dash" style="border-color:var(--water)"></i>Water table</span>${R.struts.length ? `<span><i style="border-color:var(--anchor)"></i>Strut: maximum horizontal force per m of wall from the report; angle from the horizontal</span>` : ''}</div>
     </div>
     <div class="panel">
       <h3 style="margin-bottom:6px">Final section</h3>
@@ -1323,7 +1328,7 @@ function renderOverview(el0) {
         ${K.F ? `<div><span>Min FoS (stage ${K.F.stage})</span><b>${K.F.fos.toFixed(2)}${target ? (K.F.fos >= target ? ' ✓' : ' ▼') : ''}</b></div>` : ''}
       </div>
       ${R.struts.length ? `<h3 style="margin:16px 0 6px">Anchors</h3><div class="tscroll"><table class="compact"><thead><tr><th class="l">Row</th><th>Level</th><th>@<small>m</small></th><th>H max<small>${u.Fm}</small></th><th>T max<small>${u.F}</small></th></tr></thead><tbody>
-        ${R.struts.map(a => { const g = gov[a.no]; return `<tr><td class="l">A${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.spacing, 2)}</td><td>${g ? fF(g.perM, 2) : '–'}</td><td>${g ? fF(g.axial, 1) : '–'}</td></tr>`; }).join('')}
+        ${R.struts.map(a => { const g = gov[a.no]; return `<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.spacing, 2)}</td><td>${g ? fF(g.perM, 2) : '–'}</td><td>${g ? fF(g.axial, 1) : '–'}</td></tr>`; }).join('')}
       </tbody></table></div>
       <p class="hint" style="margin:8px 0 0"><button type="button" class="link" data-goto="design">Choose anchor spacing and strands →</button></p>` : ''}
       <h3 style="margin:16px 0 6px">Soil layers</h3>
@@ -1354,22 +1359,22 @@ function renderAnchors(el0) {
   el0.innerHTML = `
   <div class="panel">
     <div class="panel-head"><h2>${esc(name)} · anchor layout</h2><span class="hint">Each anchor shows its maximum force from the consultant's report</span>${quickExp('anchors')}</div>
-    <div class="drawing">${sectionSVG(R, last, { forces: gov, title: name, subtitle: 'Anchor layout · maximum force per anchor (T) and per metre of wall (H)' })}</div>
-    <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i style="border-color:var(--anchor)"></i>T = force along the anchor, H = horizontal force per m of wall</span></div>
+    <div class="drawing">${sectionSVG(R, last, { forces: gov, title: name, subtitle: 'Strut layout · maximum force per strut from the WALLAP report (horizontal, per m of wall)' })}</div>
+    <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i style="border-color:var(--anchor)"></i>Strut: maximum horizontal force per m of wall from the report; angle from the horizontal</span></div>
     <p class="hint" style="margin:8px 0 0"><button type="button" class="link" data-goto="export">Export at 1:100 (DXF / PDF) →</button></p>
   </div>
   <div class="anchors-grid">${R.struts.map(a => { const g = gov[a.no]; const inst = R.stages.find(s => new RegExp('(strut|anchor) no\\.\\s*' + a.no + '\\b', 'i').test(s.desc) && /install/i.test(s.desc)); return `
     <div class="panel acard">
-      <div class="panel-head" style="margin:0"><h2>Anchor A${a.no}</h2><span class="chip">${inst ? 'installed stage ' + inst.no : ''}</span></div>
-      <div class="k-label hint" style="text-transform:uppercase;letter-spacing:.07em">Max force along anchor</div>
-      <div class="big">${g ? fF(g.axial) : '–'}<span>${u.F}/anchor</span></div>
+      <div class="panel-head" style="margin:0"><h2>Strut ${a.no}</h2><span class="chip">${inst ? 'installed stage ' + inst.no : ''}</span></div>
+      <div class="k-label hint" style="text-transform:uppercase;letter-spacing:.07em">Max force from the report</div>
+      <div class="big">${g ? fF(g.perM, 2) : '–'}<span>${u.Fm} horizontal</span></div>
       <div class="keys">
         <div><span>Level</span><b>${el(a.elev)}</b></div>
         <div><span>Spacing</span><b>${fx(a.spacing, 2)} m</b></div>
         <div><span>Inclination</span><b>${fx(a.incl, 1)}°</b></div>
         <div><span>Free length</span><b>${fx(a.freeLength, 2)} m</b></div>
         <div><span>Prestress</span><b>${fF(a.prestress, 1)} ${u.F}</b></div>
-        <div><span>Horizontal, per m of wall</span><b>${g ? fF(g.perM, 2) + ' ' + u.Fm : '–'}</b></div>
+        <div><span>Along the anchor, per anchor</span><b>${g ? fF(g.axial, 1) + ' ' + u.F : '–'}</b></div>
         <div><span>Governing stage</span><b>${g ? g.stage : '–'}</b></div>
         <div><span>Tension allowed</span><b>${esc(a.tension)}</b></div>
       </div>
@@ -1378,8 +1383,8 @@ function renderAnchors(el0) {
   </div>
   <div class="panel">
     <div class="panel-head"><h2>Anchor forces by stage</h2><span class="hint">Axial force = horizontal force ÷ cos(inclination)</span></div>
-    <div class="tscroll"><table><thead><tr><th class="l">Stage</th><th class="l">Anchor</th><th>Level</th><th>Horizontal<small>${u.Fm}</small></th><th>Horizontal<small>${u.F}/anchor</small></th><th>Axial<small>${u.F}/anchor</small></th><th>Axial<small>${u.Fm}</small></th></tr></thead><tbody>
-    ${rows.map(r => `<tr class="${gov[r.no] && gov[r.no].stage === r.stage ? 'gov' : ''}"><td class="l">${r.stage}</td><td class="l">A${r.no}</td><td>${el(r.s.elev)}</td><td>${fF(r.perM, 2)}</td><td>${fF(r.perStrut, 2)}</td><td>${fF(r.axial, 2)}</td><td>${fF(r.axialM, 2)}</td></tr>`).join('')}
+    <div class="tscroll"><table><thead><tr><th class="l">Stage</th><th class="l">Strut</th><th>Level</th><th>Horizontal<small>${u.Fm}</small></th><th>Horizontal<small>${u.F}/anchor</small></th><th>Axial<small>${u.F}/anchor</small></th><th>Axial<small>${u.Fm}</small></th></tr></thead><tbody>
+    ${rows.map(r => `<tr class="${gov[r.no] && gov[r.no].stage === r.stage ? 'gov' : ''}"><td class="l">${r.stage}</td><td class="l">Strut ${r.no}</td><td>${el(r.s.elev)}</td><td>${fF(r.perM, 2)}</td><td>${fF(r.perStrut, 2)}</td><td>${fF(r.axial, 2)}</td><td>${fF(r.axialM, 2)}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="hint" style="margin:8px 0 0">Highlighted rows are the governing force for each anchor.</p>
   </div>`;
@@ -1402,7 +1407,7 @@ function elevationSVG(R, gov, name) {
     const off = (L - (n - 1) * sp) / 2;
     for (let i = 0; i < n; i++) o.push(`<circle cx="${X(off + i * sp)}" cy="${Y(a.elev)}" r="${Math.max(2, Math.min(5, sp * s * 0.28))}" style="fill:var(--anchor)"/>`);
     const g = gov[a.no];
-    o.push(`<text x="${X(0) - 4}" y="${Y(a.elev) + 4}" text-anchor="end" style="fill:var(--anchor);font-size:10px;font-weight:600">A${a.no}</text>`);
+    o.push(`<text x="${X(0) - 4}" y="${Y(a.elev) + 4}" text-anchor="end" style="fill:var(--anchor);font-size:10px;font-weight:600">S${a.no}</text>`);
     o.push(`<text x="${X(L / 2)}" y="${Y(a.elev) - 14}" text-anchor="middle" style="fill:var(--ink);font-size:11px;font-family:var(--font-mono);paint-order:stroke;stroke:var(--surface-2);stroke-width:3px">${n} × @${sp.toFixed(2)} m${g ? ' · T ' + fF(g.axial) + ' ' + u.F : ''}</text>`);
   }
   o.push(`<text x="${X(0)}" y="${H - 8}" style="fill:var(--muted);font-size:10px">0</text><text x="${X(L)}" y="${H - 8}" text-anchor="end" style="fill:var(--muted);font-size:10px">${L} m</text>`);
@@ -1471,7 +1476,7 @@ function renderDesign(el0) {
   </div>
   ${R.struts.map(a => { const g = gov[a.no], r = rows[a.no]; return `
   <div class="panel dcard">
-    <div class="panel-head"><h2>Row A${a.no} · ${el(a.elev)}</h2><span class="hint">Inclination ${fx(a.incl, 1)}° · consultant modelled ${fx(a.spacing, 2)} m spacing</span></div>
+    <div class="panel-head"><h2>Strut ${a.no} · ${el(a.elev)}</h2><span class="hint">Inclination ${fx(a.incl, 1)}° · consultant modelled ${fx(a.spacing, 2)} m spacing</span></div>
     ${g ? `<div class="dz-grid">
       <div class="dz-req"><div class="k-label">Required by the consultant</div><div class="big" id="dreq-${a.no}"></div><div class="hint" id="dreqs-${a.no}"></div></div>
       <div class="dz-in">
@@ -1513,7 +1518,7 @@ function renderDesign(el0) {
           ${c.count != null ? `<div><span>Anchors along ${R.options.wallLength} m of wall</span><b>≈ ${c.count}</b></div>` : ''}
         </div>`;
       q('dmx-' + a.no).innerHTML = dzMatrix(R, a, g, r);
-      sum.push(`<tr><td class="l">A${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.incl, 0)}°</td><td>${r.s.toFixed(2)}</td><td>${c.n}</td><td>${fF(c.T, 2)}</td><td>${fF(c.cap, 2)}</td><td>${Math.round(c.util * 100)}%</td><td>${fF(c.Hprov, 2)}</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${ok ? '<span class="chip good">✓ OK</span>' : '<span class="chip crit">✗ Increase</span>'}</td></tr>`);
+      sum.push(`<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.incl, 0)}°</td><td>${r.s.toFixed(2)}</td><td>${c.n}</td><td>${fF(c.T, 2)}</td><td>${fF(c.cap, 2)}</td><td>${Math.round(c.util * 100)}%</td><td>${fF(c.Hprov, 2)}</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${ok ? '<span class="chip good">✓ OK</span>' : '<span class="chip crit">✗ Increase</span>'}</td></tr>`);
     }
     q('dsum').innerHTML = `<table><thead><tr><th class="l">Row</th><th>Level</th><th>Incl.</th><th>Spacing<small>m</small></th><th>Strands</th><th>Force<small>${uu.F}/anchor</small></th><th>Capacity<small>${uu.F}/anchor</small></th><th>Used</th><th>Provided H<small>${uu.Fm}</small></th><th>Required H<small>${uu.Fm}</small></th><th>Anchors<small>per ${R.options.wallLength ?? '–'} m</small></th><th class="l">Status</th></tr></thead><tbody>${sum.join('')}</tbody></table>`;
     dzSave(R);
@@ -1569,12 +1574,14 @@ function expPeaks(curves, maxAbs) {
   });
   return cand.sort((a, b) => (!!b.main - !!a.main) || (b.a - a.a));
 }
-function exportModel(R, kind) {
+function exportModel(R, kind, scale) {
+  scale = scale || EXP.scale || 100;
+  const q = scale / 100;            // symbols and text keep the same size on paper at any scale
   const u = U(), f = u.f;
   const lastNo = R.stages.length ? R.stages[R.stages.length - 1].no : null;
   const st = R.derived.stageState.find(s => s.stage === lastNo) || R.derived.stageState[R.derived.stageState.length - 1] || { glActive: R.derived.groundTop, glPassive: R.derived.groundTop, struts: R.struts.map(a => a.no), waterActive: R.water.active };
   const top = R.derived.wallTop, toe = R.wall.toe ?? top - 10, name = sectionName(R);
-  const H = 0.25, Hs = 0.2, Ht = 0.45;
+  const H = 0.25 * q, Hs = 0.2 * q, Ht = 0.45 * q;
   const items = [];
   const line = (layer, pts) => items.push({ t: 'line', layer, pts });
   const text = (layer, x, y, s, h = H, align = 'left', rot = 0) => items.push({ t: 'text', layer, x, y, s: String(s), h, align, rot });
@@ -1589,56 +1596,59 @@ function exportModel(R, kind) {
     if (kind === 'V') { diag = { dir: 1, unit: Fm, dec: 1, curves: [{ pts: P('VMax', f), layer: 'WLP-MAX', name: 'max' }, { pts: P('VMin', f), layer: 'WLP-MIN', name: 'min' }] }; title = 'Shear force, envelope of all stages'; summary = K.V ? `max |V| ${fx(Math.abs(K.V.v) * f, 1)} ${Fm} at ${el(K.V.y)}` : ''; }
     if (kind === 'D') { const c = [{ pts: P('dMax', 1000), layer: 'WLP-MAX', name: 'max' }]; if (env.some(e => Math.abs(e.dMin) > 0.0005)) c.push({ pts: P('dMin', 1000), layer: 'WLP-MIN', name: 'min' }); diag = { dir: 1, unit: 'mm', dec: 0, curves: c }; title = 'Displacement, envelope of all stages'; summary = K.D ? `max ${mm(K.D.v)} mm at ${el(K.D.y)}` : ''; }
     const maxAbs = Math.max(1e-9, ...diag.curves.flatMap(c => c.pts.map(p => Math.abs(p.v))));
-    diag.per = niceUp(maxAbs / 3.5);               // value per metre of drawing (= per cm at 1:100)
+    diag.per = niceUp(maxAbs / 3.5);               // value per metre of model
     const xs = diag.curves.flatMap(c => c.pts.map(p => diag.dir * p.v / diag.per));
     xmin = Math.min(-2.5, Math.min(...xs) - 2.2); xmax = Math.max(2.5, Math.max(...xs) + 2.2);
-    unitTxt = `Diagram scale 1 cm = ${+diag.per.toPrecision(6)} ${diag.unit} (1 m in model)`;
+    diag.perCm = +(diag.per * q).toPrecision(6);   // value per cm on the sheet
+    unitTxt = `diagram scale 1 cm = ${diag.perCm} ${diag.unit} at 1:${scale}`;
   } else {
     const reach = Math.max(2, ...R.struts.map(a => (a.freeLength || 6) * 1.35 * Math.cos((a.incl || 0) * Math.PI / 180)));
     xmin = -(reach + 1.2); xmax = 4.5;
-    title = 'Section and anchors, final stage' + (lastNo != null ? ' ' + lastNo : '');
-    summary = R.struts.map(a => gov[a.no] ? `A${a.no}: T ${fx(gov[a.no].axial * f, 1)} ${F}/anchor, H ${fx(gov[a.no].perM * f, 2)} ${Fm}` : `A${a.no}`).join('; ');
+    title = 'Section and struts, final stage' + (lastNo != null ? ' ' + lastNo : '');
+    summary = 'maximum strut forces from the WALLAP report (horizontal, per m of wall)';
   }
   // wall, ground, water
   line('WLP-WALL', [[0, top], [0, toe]]);
-  const ground = (x0, x1, y) => { line('WLP-GROUND', [[x0, y], [x1, y]]); for (let x = x0 + 0.25; x < x1 - 0.1; x += 0.5) line('WLP-GROUND', [[x, y], [x - 0.18, y - 0.18]]); };
+  const ground = (x0, x1, y) => { line('WLP-GROUND', [[x0, y], [x1, y]]); for (let x = x0 + 0.25 * q; x < x1 - 0.1 * q; x += 0.5 * q) line('WLP-GROUND', [[x, y], [x - 0.18 * q, y - 0.18 * q]]); };
   ground(xmin, 0, st.glActive); ground(0, xmax, st.glPassive);
   let ybot = toe;
   const w = st.waterActive;
   if (w != null && w <= top && w >= toe - 3) {
-    for (let x = xmin; x < xmax; x += 0.8) line('WLP-WATER', [[x, w], [Math.min(x + 0.5, xmax), w]]);
-    line('WLP-WATER', [[xmin + 1, w + 0.08], [xmin + 1.3, w + 0.35], [xmin + 0.7, w + 0.35], [xmin + 1, w + 0.08]]);
-    text('WLP-WATER', xmin + 1.45, w + 0.1, 'W.T.', Hs);
+    for (let x = xmin; x < xmax; x += 0.8 * q) line('WLP-WATER', [[x, w], [Math.min(x + 0.5 * q, xmax), w]]);
+    line('WLP-WATER', [[xmin + 1, w + 0.08 * q], [xmin + 1 + 0.3 * q, w + 0.35 * q], [xmin + 1 - 0.3 * q, w + 0.35 * q], [xmin + 1, w + 0.08 * q]]);
+    text('WLP-WATER', xmin + 1 + 0.45 * q, w + 0.1 * q, 'W.T.', Hs);
     ybot = Math.min(ybot, w);
   }
-  // anchors
+  // struts / anchors
   for (const a of R.struts) {
     if (!st.struts.includes(a.no)) continue;
-    const ang = (a.incl || 0) * Math.PI / 180, ca = Math.cos(ang), sa = Math.sin(ang);
+    const deg = a.incl || 0, ang = deg * Math.PI / 180, ca = Math.cos(ang), sa = Math.sin(ang);
     if (kind === 'anchors') {
       const L = a.freeLength || 6, Lb = Math.min(0.35 * L, (-xmin - L * ca - 0.3) / ca);
       line('WLP-ANCHOR', [[0, a.elev], [-L * ca, a.elev - L * sa]]);
-      const bx = -(L + Lb) * ca, by = a.elev - (L + Lb) * sa, px = -sa * 0.12, py = ca * 0.12, fx0 = -L * ca, fy0 = a.elev - L * sa;
+      const bx = -(L + Lb) * ca, by = a.elev - (L + Lb) * sa, px = -sa * 0.12 * q, py = ca * 0.12 * q, fx0 = -L * ca, fy0 = a.elev - L * sa;
       line('WLP-ANCHOR', [[fx0 + px, fy0 + py], [bx + px, by + py], [bx - px, by - py], [fx0 - px, fy0 - py], [fx0 + px, fy0 + py]]);
-      line('WLP-ANCHOR', [[0.12, a.elev + 0.3], [0.12, a.elev - 0.3]]);
-      const mx = -L * 0.5 * ca, my = a.elev - L * 0.5 * sa, deg = a.incl || 0;
+      line('WLP-ANCHOR', [[0.12 * q, a.elev + 0.3 * q], [0.12 * q, a.elev - 0.3 * q]]);
+      // angle between the horizontal and the anchor, at the wall
+      if (deg) {
+        const rr = 1.3 * q, arc = [];
+        line('WLP-DIM', [[0, a.elev], [-1.9 * q, a.elev]]);
+        for (let i = 0; i <= 10; i++) { const t = ang * i / 10; arc.push([-rr * Math.cos(t), a.elev - rr * Math.sin(t)]); }
+        line('WLP-DIM', arc);
+        text('WLP-DIM', -rr - 0.12 * q, a.elev - rr * Math.sin(ang / 2) - 0.5 * Hs, `${fx(deg, deg % 1 ? 1 : 0)}°`, Hs, 'right');
+      }
       const g = gov[a.no];
-      const off = (d) => [mx - sa * d, my + ca * d];
-      const [x1, y1] = off(0.18), [x2, y2] = off(-0.18 - H), [x3, y3] = off(-0.3 - H - Hs - 0.12);
-      text('WLP-ANCHOR', x1, y1, `A${a.no}  T = ${g ? fx(g.axial * f, 1) : '-'} ${F}/anchor`, 0.3, 'center', deg);
-      if (g) text('WLP-TEXT', x2, y2, `H = ${fx(g.perM * f, 2)} ${Fm} (stage ${g.stage})`, H, 'center', deg);
-      text('WLP-TEXT', x3, y3, `L free ${fx(a.freeLength, 2)} m, ${fx(deg, 0)}°, @ ${fx(a.spacing, 2)} m, prestress ${fx(a.prestress * f, 1)} ${F}`, Hs, 'center', deg);
+      const mx = -L * 0.55 * ca, my = a.elev - L * 0.55 * sa, off = -0.16 * q - 0.3 * q;
+      text('WLP-ANCHOR', mx - sa * off, my + ca * off, `Strut ${a.no}: ${g ? fx(g.perM * f, 2) + ' ' + Fm : 'no force in report'}`, 0.3 * q, 'center', deg);
     } else {
-      line('WLP-ANCHOR', [[0, a.elev], [-0.7 * ca, a.elev - 0.7 * sa]]);
+      line('WLP-ANCHOR', [[0, a.elev], [-0.7 * q * ca, a.elev - 0.7 * q * sa]]);
     }
   }
-  // dimensions (anchors sheet)
   if (kind === 'anchors') {
     const dx = 1.6;
-    const dim = (ya, yb) => { if (Math.abs(ya - yb) < 0.2) return; line('WLP-DIM', [[dx, ya], [dx, yb]]); for (const y of [ya, yb]) line('WLP-DIM', [[dx - 0.15, y - 0.15], [dx + 0.15, y + 0.15]]); text('WLP-DIM', dx - 0.12, (ya + yb) / 2, `${(ya - yb).toFixed(2)}`, H, 'center', 90); };
+    const dim = (ya, yb) => { if (Math.abs(ya - yb) < 0.2) return; line('WLP-DIM', [[dx, ya], [dx, yb]]); for (const y of [ya, yb]) line('WLP-DIM', [[dx - 0.15 * q, y - 0.15 * q], [dx + 0.15 * q, y + 0.15 * q]]); text('WLP-DIM', dx - 0.12 * q, (ya + yb) / 2, `${(ya - yb).toFixed(2)}`, H, 'center', 90); };
     dim(top, st.glPassive); dim(st.glPassive, toe);
   }
-  // diagram
   if (diag) {
     for (const c of diag.curves) {
       if (!c.pts.length || c.pts.every(p => Math.abs(p.v) < 1e-9)) continue;
@@ -1651,44 +1661,52 @@ function exportModel(R, kind) {
     const placed = [];
     for (const c of expPeaks(diag.curves, maxAbs)) {
       const x = diag.dir * c.v / diag.per, side = Math.sign(x) || 1;
-      if (placed.some(q => q.side === side && Math.abs(q.y - c.y) < (q.main || c.main ? 0.75 : 0.45))) continue;
+      if (placed.some(p => p.side === side && Math.abs(p.y - c.y) < (p.main || c.main ? 0.75 : 0.45) * q)) continue;
       placed.push({ side, y: c.y, main: c.main });
-      const al = side > 0 ? 'left' : 'right', tx = x + side * 0.18;
-      text('WLP-TEXT', tx, c.y - (c.main ? 0.02 : 0.12), fx(c.v, diag.dec), c.main ? 0.3 : H, al);
-      if (c.main) text('WLP-TEXT', tx, c.y - 0.34, '@ ' + el(c.y), Hs, al);
-      line(diag.curves[c.ci].layer, [[x - 0.08, c.y], [x + 0.08, c.y]]);
+      const al = side > 0 ? 'left' : 'right', tx = x + side * 0.18 * q;
+      text('WLP-TEXT', tx, c.y - (c.main ? 0.02 : 0.12) * q, fx(c.v, diag.dec), c.main ? 0.3 * q : H, al);
+      if (c.main) text('WLP-TEXT', tx, c.y - 0.34 * q, '@ ' + el(c.y), Hs, al);
+      line(diag.curves[c.ci].layer, [[x - 0.08 * q, c.y], [x + 0.08 * q, c.y]]);
     }
   }
   // level marks on the right
   const levels = [{ y: top, t: 'top of wall' }];
   if (Math.abs(st.glActive - top) > 0.01) levels.push({ y: st.glActive, t: 'ground' });
   if (st.glPassive < top - 0.01) levels.push({ y: st.glPassive, t: 'excavation' });
-  for (const a of R.struts) if (st.struts.includes(a.no)) levels.push({ y: a.elev, t: 'anchor A' + a.no });
+  for (const a of R.struts) if (st.struts.includes(a.no)) levels.push({ y: a.elev, t: 'strut ' + a.no });
   levels.push({ y: toe, t: 'toe' });
   if (w != null && w >= toe - 3 && w <= top) levels.push({ y: w, t: 'water table' });
   levels.sort((a, b) => b.y - a.y);
   let last = 1e9;
   for (const l of levels) {
-    const ty = Math.min(l.y, last - 0.62); last = ty;
-    line('WLP-LEVEL', [[xmax, l.y], [xmax + 0.35, l.y], [xmax + 0.55, ty]]);
-    line('WLP-LEVEL', [[xmax + 0.35, l.y], [xmax + 0.22, l.y + 0.18], [xmax + 0.48, l.y + 0.18], [xmax + 0.35, l.y]]);
-    text('WLP-LEVEL', xmax + 0.65, ty - 0.1, el(l.y), H);
-    text('WLP-TEXT', xmax + 0.65, ty - 0.38, l.t, 0.16);
+    const ty = Math.min(l.y, last - 0.62 * q); last = ty;
+    line('WLP-LEVEL', [[xmax, l.y], [xmax + 0.35 * q, l.y], [xmax + 0.55 * q, ty]]);
+    line('WLP-LEVEL', [[xmax + 0.35 * q, l.y], [xmax + 0.22 * q, l.y + 0.18 * q], [xmax + 0.48 * q, l.y + 0.18 * q], [xmax + 0.35 * q, l.y]]);
+    text('WLP-LEVEL', xmax + 0.65 * q, ty - 0.1 * q, el(l.y), H);
+    text('WLP-TEXT', xmax + 0.65 * q, ty - 0.38 * q, l.t, 0.16 * q);
   }
-  // scale bars and title block below the drawing
-  let yb = ybot - 1.0;
+  // scale bars, title block and (struts sheet) a strut table below the drawing
+  let yb = Math.min(ybot, levels.length ? last : ybot) - 1.0 * q;
   line('WLP-SCALE', [[xmin, yb], [xmin + 5, yb]]);
-  for (let i = 0; i <= 5; i++) line('WLP-SCALE', [[xmin + i, yb], [xmin + i, yb + (i % 5 ? 0.12 : 0.22)]]);
-  text('WLP-SCALE', xmin + 5.2, yb - 0.08, '5 m  (50 mm at 1:100)', Hs);
+  for (let i = 0; i <= 5; i++) line('WLP-SCALE', [[xmin + i, yb], [xmin + i, yb + (i % 5 ? 0.12 : 0.22) * q]]);
+  text('WLP-SCALE', xmin + 5 + 0.2 * q, yb - 0.08 * q, `5 m  (${5000 / scale} mm at 1:${scale})`, Hs);
   if (diag) {
-    yb -= 0.75;
-    line('WLP-SCALE', [[xmin, yb], [xmin + 2, yb]]); for (let i = 0; i <= 2; i++) line('WLP-SCALE', [[xmin + i, yb], [xmin + i, yb + 0.15]]);
-    text('WLP-SCALE', xmin + 2.2, yb - 0.08, `${+(2 * diag.per).toPrecision(6)} ${diag.unit}   (${unitTxt})`, Hs);
+    yb -= 0.75 * q;
+    line('WLP-SCALE', [[xmin, yb], [xmin + 2, yb]]); for (let i = 0; i <= 2; i++) line('WLP-SCALE', [[xmin + i, yb], [xmin + i, yb + 0.15 * q]]);
+    text('WLP-SCALE', xmin + 2 + 0.2 * q, yb - 0.08 * q, `${+(2 * diag.per).toPrecision(6)} ${diag.unit}   (${unitTxt})`, Hs);
   }
-  yb -= 1.0;
+  yb -= 1.0 * q;
   text('WLP-TEXT', xmin, yb, `${name} - ${title}`, Ht);
-  text('WLP-TEXT', xmin, yb - 0.55, `Scale 1:100${R.meta.job ? ' | Job ' + R.meta.job : ''}${summary ? ' | ' + summary : ''}`, H);
-  text('WLP-TEXT', xmin, yb - 0.95, `From WALLAP report ${R.meta.runId || ''}. x = 0 at wall, y = elevation (m).${kind === 'M' ? ' +M drawn on the retained side, as in WALLAP.' : ''}`, Hs);
+  text('WLP-TEXT', xmin, yb - 0.55 * q, `Scale 1:${scale}${R.meta.job ? ' | Job ' + R.meta.job : ''}${summary ? ' | ' + summary : ''}`, H);
+  text('WLP-TEXT', xmin, yb - 0.95 * q, `From WALLAP report ${R.meta.runId || ''}. x = 0 at wall, y = elevation (m).${kind === 'M' ? ' +M drawn on the retained side, as in WALLAP.' : ''}`, Hs);
+  if (kind === 'anchors') {
+    let ty = yb - 1.55 * q;
+    for (const a of R.struts) {
+      const g = gov[a.no];
+      text('WLP-TEXT', xmin, ty, `Strut ${a.no}   ${el(a.elev)}   ${fx(a.incl || 0, 0)}°   @ ${fx(a.spacing, 2)} m   L free ${fx(a.freeLength, 2)} m   prestress ${fx((a.prestress || 0) * f, 1)} ${F}   max ${g ? fx(g.perM * f, 2) + ' ' + Fm + ' (stage ' + g.stage + ')' : '-'}`, Hs);
+      ty -= 0.38 * q;
+    }
+  }
   // bounds
   const bb = { xmin: 1e9, xmax: -1e9, ymin: 1e9, ymax: -1e9 };
   const add = (x, y) => { bb.xmin = Math.min(bb.xmin, x); bb.xmax = Math.max(bb.xmax, x); bb.ymin = Math.min(bb.ymin, y); bb.ymax = Math.max(bb.ymax, y); };
@@ -1696,7 +1714,7 @@ function exportModel(R, kind) {
     if (it.t === 'line') it.pts.forEach(p => add(p[0], p[1]));
     else { const wdt = textWidth(it.s) * it.h / 0.718, c = Math.cos(it.rot * Math.PI / 180), s = Math.sin(it.rot * Math.PI / 180); const x0 = it.align === 'center' ? -wdt / 2 : it.align === 'right' ? -wdt : 0; for (const [dx, dy] of [[x0, -0.3 * it.h], [x0 + wdt, -0.3 * it.h], [x0, it.h * 1.1], [x0 + wdt, it.h * 1.1]]) add(it.x + dx * c - dy * s, it.y + dx * s + dy * c); }
   }
-  return { kind, name, title, items, bb, diag };
+  return { kind, name, title, items, bb, diag, scale };
 }
 // Helvetica advance widths (per 1000 em) for text extents and PDF alignment
 const HELV = (() => { const w = {}; const set = (chars, v) => { for (const ch of chars) w[ch] = v; };
@@ -1747,12 +1765,13 @@ function toDXF(models, k) {
 
 // ---- PDF (vector, one page per drawing, true 1:100)
 function toPDF(models) {
-  const MM = 72 / 25.4, SC = 10; // 1 m model = 10 mm paper at 1:100
+  const MM = 72 / 25.4;
   const sheets = [['A4', 210, 297], ['A3', 297, 420], ['A2', 420, 594], ['A1', 594, 841], ['A0', 841, 1189]];
   const enc = s => { let o = ''; for (const ch of s) { const c = ch === '·' ? 0xB7 : ch === '°' ? 0xB0 : ch === '²' ? 0xB2 : ch.charCodeAt(0); if (c === 40 || c === 41 || c === 92) o += '\\' + ch; else if (c >= 32 && c < 127) o += ch; else if (c < 256) o += '\\' + c.toString(8).padStart(3, '0'); else o += '-'; } return o; };
   const hex = h => [1, 3, 5].map(i => (parseInt(h.substr(i, 2), 16) / 255).toFixed(3)).join(' ');
   const pages = [];
   for (const m of models) {
+    const SC = 1000 / (m.scale || 100); // mm on paper per m of model
     const wmm = (m.bb.xmax - m.bb.xmin) * SC, hmm = (m.bb.ymax - m.bb.ymin) * SC, margin = 12;
     let pw, ph, label = 'custom';
     for (const [nm, a, b] of sheets) { if (wmm + 2 * margin <= a && hmm + 2 * margin + 8 <= b) { pw = a; ph = b; label = nm + ' portrait'; break; } if (wmm + 2 * margin <= b && hmm + 2 * margin + 8 <= a) { pw = b; ph = a; label = nm + ' landscape'; break; } }
@@ -1771,7 +1790,7 @@ function toPDF(models) {
       const bx = (it.x * SC + ox) * MM + off * ca, by = (it.y * SC + oy) * MM + off * sa;
       c.push(`${hex(EXP_INK[it.layer] || '#111111')} rg BT /F1 ${fs.toFixed(2)} Tf ${ca.toFixed(4)} ${sa.toFixed(4)} ${(-sa).toFixed(4)} ${ca.toFixed(4)} ${bx.toFixed(2)} ${by.toFixed(2)} Tm (${enc(it.s)}) Tj ET`);
     }
-    const note = `Scale 1:100 on ${label} (${Math.round(pw)} x ${Math.round(ph)} mm). Print at actual size (100%); the 5 m bar must measure 50 mm.`;
+    const note = `Scale 1:${m.scale || 100} on ${label} (${Math.round(pw)} x ${Math.round(ph)} mm). Print at actual size (100%); the 5 m bar must measure ${5000 / (m.scale || 100)} mm.`;
     c.push(`0.4 0.4 0.4 rg BT /F1 ${(6.5).toFixed(2)} Tf 1 0 0 1 ${(margin * MM).toFixed(2)} ${(6 * MM).toFixed(2)} Tm (${enc(note)}) Tj ET`);
     pages.push({ w: pw * MM, h: ph * MM, content: c.join('\n') });
   }
@@ -1838,15 +1857,17 @@ let DL = IN_CLAUDE ? undefined : null;   // undefined while checking, null when 
 if (IN_CLAUDE) (async () => { try { DL = await window.claude.use('downloads'); } catch (e) { DL = null; } if (S.R && (S.tab === 'export' || DL === null)) render(); })();
 const CAN_PRINT = !IN_CLAUDE;
 // Drawing scale/units for DXF. Default: 1:100 in mm on the sheet.
+const EXP_SCALES = [100, 50];
 const EXP_UNITS = [
-  { v: 'p-mm', k: 10, scale: '1:100', tag: '1-100_mm', label: '1:100, mm on the sheet (1 m = 10 units)' },
-  { v: 'p-cm', k: 1, scale: '1:100', tag: '1-100_cm', label: '1:100, cm on the sheet (1 m = 1 unit)' },
-  { v: 'cm', k: 100, scale: '1:1', tag: '1-1_cm', label: 'Real size 1:1 in cm (1 m = 100 units)' },
-  { v: 'mm', k: 1000, scale: '1:1', tag: '1-1_mm', label: 'Real size 1:1 in mm (1 m = 1000 units)' },
+  { v: 'p-mm', k: sc => 1000 / sc, sheet: true, tag: sc => `1-${sc}_mm`, label: sc => `Drawn at 1:${sc}, mm on the sheet (1 m = ${1000 / sc} units)` },
+  { v: 'p-cm', k: sc => 100 / sc, sheet: true, tag: sc => `1-${sc}_cm`, label: sc => `Drawn at 1:${sc}, cm on the sheet (1 m = ${100 / sc} unit${100 / sc === 1 ? '' : 's'})` },
+  { v: 'cm', k: () => 100, tag: sc => `real-size_cm_text-1-${sc}`, label: sc => `Real size in cm (1 m = 100 units), text sized for 1:${sc}` },
+  { v: 'mm', k: () => 1000, tag: sc => `real-size_mm_text-1-${sc}`, label: sc => `Real size in mm (1 m = 1000 units), text sized for 1:${sc}` },
 ];
-const EXP = { kinds: { anchors: true, M: true, V: true, D: true }, unit: 'p-mm' };
+const EXP = { kinds: { anchors: true, M: true, V: true, D: true }, unit: 'p-mm', scale: 100 };
 try { const e = JSON.parse(localStorage.getItem('wr-exp2') || 'null'); if (e && e.kinds) Object.assign(EXP, e); } catch (e) {}
 if (!EXP_UNITS.some(x => x.v === EXP.unit)) EXP.unit = 'p-mm';
+if (!EXP_SCALES.includes(EXP.scale)) EXP.scale = 100;
 const expUnit = () => EXP_UNITS.find(x => x.v === EXP.unit);
 function expSave() { try { localStorage.setItem('wr-exp2', JSON.stringify(EXP)); } catch (e) {} }
 function safeName(s) { return String(s).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'section'; }
@@ -1869,26 +1890,28 @@ async function saveFile(filename, data, msgEl) {
 }
 function dxfFiles(R, kinds) {
   const base = safeName(sectionName(R)), un = expUnit();
-  const models = kinds.map(k => exportModel(R, k));
-  const files = models.map(m => ({ name: `${base}_${EXP_KINDS.find(x => x.k === m.kind).short}_${un.tag}.dxf`, data: toDXF([m], un.k) }));
-  if (models.length > 1) files.push({ name: `${base}_all_${un.tag}.dxf`, data: toDXF(models, un.k) });
-  return { base, un, files, models };
+  const sc = EXP.scale, tag = un.tag(sc), k = un.k(sc);
+  const models = kinds.map(kd => exportModel(R, kd, sc));
+  const files = models.map(m => ({ name: `${base}_${EXP_KINDS.find(x => x.k === m.kind).short}_${tag}.dxf`, data: toDXF([m], k) }));
+  if (models.length > 1) files.push({ name: `${base}_all_${tag}.dxf`, data: toDXF(models, k) });
+  return { base, un, files, models, tag };
 }
-function exportDXF(R, kinds, msgEl) { const { base, un, files } = dxfFiles(R, kinds); const nm = kinds.length === 1 ? `${base}_${EXP_KINDS.find(x => x.k === kinds[0]).short}_${un.tag}_DXF.zip` : `${base}_${un.tag}_DXF.zip`; saveFile(nm, toZip(files), msgEl); }
-function exportPDF(R, kinds, msgEl) { const base = safeName(sectionName(R)); const nm = kinds.length === 1 ? `${base}_${EXP_KINDS.find(x => x.k === kinds[0]).short}_1-100.pdf` : `${base}_1-100.pdf`; saveFile(nm, toPDF(kinds.map(k => exportModel(R, k))), msgEl); }
+function exportDXF(R, kinds, msgEl) { const { base, files, tag } = dxfFiles(R, kinds); const nm = kinds.length === 1 ? `${base}_${EXP_KINDS.find(x => x.k === kinds[0]).short}_${tag}_DXF.zip` : `${base}_${tag}_DXF.zip`; saveFile(nm, toZip(files), msgEl); }
+function exportPDF(R, kinds, msgEl) { const sc = EXP.scale, base = safeName(sectionName(R)); const nm = kinds.length === 1 ? `${base}_${EXP_KINDS.find(x => x.k === kinds[0]).short}_1-${sc}.pdf` : `${base}_1-${sc}.pdf`; saveFile(nm, toPDF(kinds.map(k => exportModel(R, k, sc))), msgEl); }
 // small "DXF 1:100 / PDF" buttons placed on each drawing
-function quickExp(kind) { return `<span class="exp-quick"><button type="button" class="btn sm" data-qx="dxf" data-kind="${kind}" title="Download this drawing as DXF (${esc(expUnit().label)})">DXF ${expUnit().scale}</button><button type="button" class="btn sm" data-qx="pdf" data-kind="${kind}" title="Download a PDF at 1:100">PDF</button>${CAN_PRINT ? `<button type="button" class="btn sm" data-qx="print" data-kind="${kind}" title="Print this drawing at 1:100">Print</button>` : ''}</span>`; }
+function quickExp(kind) { const sc = EXP.scale; return `<span class="exp-quick"><button type="button" class="btn sm" data-qx="dxf" data-kind="${kind}" title="Download this drawing as DXF (${esc(expUnit().label(sc))})">DXF 1:${sc}</button><button type="button" class="btn sm" data-qx="pdf" data-kind="${kind}" title="Download a PDF at 1:${sc}">PDF</button>${CAN_PRINT ? `<button type="button" class="btn sm" data-qx="print" data-kind="${kind}" title="Print this drawing at 1:${sc}">Print</button>` : ''}</span>`; }
 function wireQuick(root) { root.querySelectorAll('[data-qx]').forEach(b => b.onclick = () => ({ dxf: exportDXF, pdf: exportPDF, print: printDrawings }[b.dataset.qx])(S.R, [b.dataset.kind])); }
 // Print at true 1:100: each drawing on its own page, sized in mm (1 m = 10 mm)
 function printDrawings(R, kinds) {
-  const models = kinds.map(k => exportModel(R, k));
-  const size = m => [(m.bb.xmax - m.bb.xmin + 1.2) * 10, (m.bb.ymax - m.bb.ymin + 1.2) * 10];
-  const sheets = [['A4 portrait', 190, 270], ['A4 landscape', 277, 183], ['A3 portrait', 277, 393], ['A3 landscape', 400, 270], ['A2 portrait', 400, 567], ['A2 landscape', 574, 393], ['A1 portrait', 574, 814]];
+  const sc = EXP.scale, mpm = 1000 / sc;
+  const models = kinds.map(k => exportModel(R, k, sc));
+  const size = m => [(m.bb.xmax - m.bb.xmin + 1.2) * mpm, (m.bb.ymax - m.bb.ymin + 1.2) * mpm];
+  const sheets = [['A4 portrait', 190, 270], ['A4 landscape', 277, 183], ['A3 portrait', 277, 393], ['A3 landscape', 400, 270], ['A2 portrait', 400, 567], ['A2 landscape', 574, 393], ['A1 portrait', 574, 814], ['A1 landscape', 821, 567], ['A0 portrait', 821, 1162]];
   const need = models.map(size);
   const sheet = sheets.find(([, w, h]) => need.every(([a, b]) => a <= w && b <= h)) || sheets[sheets.length - 1];
   let area = document.getElementById('printArea');
   if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
-  area.innerHTML = models.map((m, i) => { const [w, h] = need[i]; return `<section class="print-page">${previewSVG(m, true).replace('<svg ', `<svg width="${w.toFixed(1)}mm" height="${h.toFixed(1)}mm" `)}<p class="print-note">${esc(sectionName(R))} · scale 1:100 on ${sheet[0]} · print at 100% (actual size): the 5 m bar measures 50 mm</p></section>`; }).join('');
+  area.innerHTML = models.map((m, i) => { const [w, h] = need[i]; return `<section class="print-page">${previewSVG(m, true).replace('<svg ', `<svg width="${w.toFixed(1)}mm" height="${h.toFixed(1)}mm" `)}<p class="print-note">${esc(sectionName(R))} · scale 1:${sc} on ${sheet[0]} · print at 100% (actual size): the 5 m bar measures ${5000 / sc} mm</p></section>`; }).join('');
   let st = document.getElementById('printPageStyle');
   if (!st) { st = document.createElement('style'); st.id = 'printPageStyle'; document.head.appendChild(st); }
   st.textContent = `@page { size: ${sheet[0].replace(' portrait', '').replace(' landscape', '')} ${/landscape/.test(sheet[0]) ? 'landscape' : 'portrait'}; margin: 10mm; }`;
@@ -1898,30 +1921,34 @@ function printDrawings(R, kinds) {
 function renderExport(el0) {
   const R = S.R, u = U();
   const which = EXP_KINDS.filter(x => EXP.kinds[x.k] && (x.k !== 'anchors' || R.struts.length)).map(x => x.k);
-  const models = which.map(k => exportModel(R, k));
+  const sc = EXP.scale;
+  const models = which.map(k => exportModel(R, k, sc));
   el0.innerHTML = `
   <div class="panel">
-    <div class="panel-head"><h2>Drawings at 1:100 · ${esc(sectionName(R))}</h2><span class="hint">Wall at x = 0 and level ±0.00 at y = 0, so each drawing lines up with your own section.</span></div>
+    <div class="panel-head"><h2>Drawings at 1:${sc} · ${esc(sectionName(R))}</h2><span class="hint">Wall at x = 0 and level ±0.00 at y = 0, so each drawing lines up with your own section.</span></div>
     <div class="exp-opts">
       <fieldset><legend>Drawings</legend>${EXP_KINDS.map(x => `<label class="chk"><input type="checkbox" id="exp-${x.k}" data-k="${x.k}" ${EXP.kinds[x.k] ? 'checked' : ''} ${x.k === 'anchors' && !R.struts.length ? 'disabled' : ''}> ${x.label}</label>`).join('')}</fieldset>
-      <label class="sel" for="exp-unit"><span>Scale and units of the DXF</span><select id="exp-unit">${EXP_UNITS.map(x => `<option value="${x.v}" ${EXP.unit === x.v ? 'selected' : ''}>${x.label}</option>`).join('')}</select></label>
+      <div class="sel"><span id="exp-scale-l">Scale</span><div class="seg" role="group" aria-labelledby="exp-scale-l">${EXP_SCALES.map(v => `<button type="button" data-scale="${v}" aria-pressed="${sc === v}">1:${v}</button>`).join('')}</div></div>
+      <label class="sel" for="exp-unit"><span>DXF units</span><select id="exp-unit">${EXP_UNITS.map(x => `<option value="${x.v}" ${EXP.unit === x.v ? 'selected' : ''}>${x.label(sc)}</option>`).join('')}</select></label>
       <div class="exp-btns">
-        <button type="button" class="btn primary" id="exp-dxf" ${which.length ? '' : 'disabled'}>Download DXF ${expUnit().scale} (.zip)</button>
-        <button type="button" class="btn" id="exp-pdf" ${which.length ? '' : 'disabled'}>PDF 1:100</button>
-        ${CAN_PRINT ? `<button type="button" class="btn" id="exp-print" ${which.length ? '' : 'disabled'}>Print 1:100</button>` : ''}
+        <button type="button" class="btn primary" id="exp-dxf" ${which.length ? '' : 'disabled'}>Download DXF 1:${sc} (.zip)</button>
+        <button type="button" class="btn" id="exp-pdf" ${which.length ? '' : 'disabled'}>PDF 1:${sc}</button>
+        ${CAN_PRINT ? `<button type="button" class="btn" id="exp-print" ${which.length ? '' : 'disabled'}>Print 1:${sc}</button>` : ''}
       </div>
     </div>
     <p class="exp-msg" id="exp-msg">${DL === null && IN_CLAUDE ? 'Saving files is not available in this view. Open the page on claude.ai to download.' : ''}</p>
     <ul class="hint exp-notes">
-      <li><b>DXF</b> (default 1:100, mm on the sheet): one file per drawing plus one with all of them side by side, AutoCAD R12 format, layers named WLP-. Text is 2.5 mm high on the sheet. Choose real size 1:1 above if you draw full size in model space.</li>
-      <li><b>PDF</b>: one page per drawing at 1:100 on the smallest A-size sheet that fits, for printing at actual size (the 5 m bar measures 50 mm).</li>${CAN_PRINT ? `<li><b>Print</b>: sends the drawings straight to your printer at 1:100. In the print dialog set the scale to 100% / Actual size.</li>` : ''}
+      <li><b>Scale</b>: 1:100 is the default; 1:50 draws everything twice as large on the sheet. Text and symbols stay 2.5 mm high at either scale.</li>
+      <li><b>DXF</b> (default mm on the sheet): one file per drawing plus one with all of them side by side, AutoCAD R12 format, layers named WLP-. Choose real size if you draw full size in model space.</li>
+      <li><b>PDF</b>: one page per drawing on the smallest A-size sheet that fits, for printing at actual size (the 5 m bar measures ${5000 / sc} mm).</li>${CAN_PRINT ? `<li><b>Print</b>: sends the drawings straight to your printer. In the print dialog set the scale to 100% / Actual size.</li>` : ''}
       <li>Every drawing in the app has its own DXF and PDF buttons using these settings. Forces are in ${esc(u.F)} as selected at the top of the page, and each diagram states its value scale (1 cm on the sheet = so many ${esc(asciiUnit(u.M))}).</li>
     </ul>
   </div>
-  <div class="paper-grid">${models.map(m => `<figure class="paper" style="flex:${(m.bb.xmax - m.bb.xmin + 1.2).toFixed(2)} 1 0"><div class="paper-sheet">${previewSVG(m)}</div><figcaption>${esc(EXP_KINDS.find(x => x.k === m.kind).label)}${m.diag ? ` · 1 cm = ${+m.diag.per.toPrecision(6)} ${esc(m.diag.unit)}` : ''}</figcaption></figure>`).join('')}</div>`;
+  <div class="paper-grid">${models.map(m => `<figure class="paper" style="flex:${(m.bb.xmax - m.bb.xmin + 1.2).toFixed(2)} 1 0"><div class="paper-sheet">${previewSVG(m)}</div><figcaption>${esc(EXP_KINDS.find(x => x.k === m.kind).label)} · 1:${sc}${m.diag ? ` · 1 cm = ${m.diag.perCm} ${esc(m.diag.unit)}` : ''}</figcaption></figure>`).join('')}</div>`;
   const msg = el0.querySelector('#exp-msg');
   el0.querySelectorAll('input[data-k]').forEach(c => c.onchange = () => { EXP.kinds[c.dataset.k] = c.checked; expSave(); render(); });
   el0.querySelector('#exp-unit').onchange = e => { EXP.unit = e.target.value; expSave(); render(); };
+  el0.querySelectorAll('[data-scale]').forEach(b => b.onclick = () => { EXP.scale = +b.dataset.scale; expSave(); render(); });
   el0.querySelector('#exp-dxf').onclick = () => exportDXF(R, which, msg);
   el0.querySelector('#exp-pdf').onclick = () => exportPDF(R, which, msg);
   const pb = el0.querySelector('#exp-print'); if (pb) pb.onclick = () => printDrawings(R, which);
@@ -1935,13 +1962,13 @@ function renderStages(el0) {
   el0.innerHTML = `
   <div class="panel">
     <div class="panel-head"><h2>Construction sequence</h2><span class="hint">${esc(R.options.stabilityMethod || '')}${target ? ` · required FoS on soil strength ${target.toFixed(2)}` : ''}</span></div>
-    <div class="tscroll"><table><thead><tr><th class="l">Stage</th><th class="l">What happens</th><th>Ground<small>ret. / exc.</small></th><th>FoS</th><th>Toe for FoS<small>el.</small></th><th>M max / min<small>${u.M}</small></th><th>V max<small>${u.Fm}</small></th><th>Displ.<small>mm</small></th><th>Anchor forces<small>${u.F}/anchor, axial</small></th></tr></thead><tbody>
+    <div class="tscroll"><table><thead><tr><th class="l">Stage</th><th class="l">What happens</th><th>Ground<small>ret. / exc.</small></th><th>FoS</th><th>Toe for FoS<small>el.</small></th><th>M max / min<small>${u.M}</small></th><th>V max<small>${u.Fm}</small></th><th>Displ.<small>mm</small></th><th>Strut forces<small>${u.Fm}, horizontal</small></th></tr></thead><tbody>
     ${R.stages.map(s => {
       const st = R.summary.stability.find(x => x.stage === s.no) || R.results[s.no]?.stability; const g = R.derived.stageState.find(x => x.stage === s.no);
       const m = R.summary.stageMax.find(x => x.stage === s.no); const d = R.summary.stageDisp.find(x => x.stage === s.no);
       const f = sf.filter(r => r.stage === s.no);
       const fos = st?.fos != null ? `${st.fos.toFixed(2)} ${target ? (st.fos >= target ? '<span class="chip good">✓</span>' : '<span class="chip crit">▼ low</span>') : ''}` : `<span class="hint">${st?.note ? 'n/a' : '–'}</span>`;
-      return `<tr><td class="l">${s.no}</td><td class="txt">${esc(s.desc)}</td><td>${el(g?.glActive)} / ${el(g?.glPassive)}</td><td>${fos}</td><td>${st?.toeForFos != null ? el(st.toeForFos) : '–'}</td><td>${m ? fF(m.MMax) + ' / ' + fF(m.MMin) : '–'}</td><td>${m ? fF(Math.max(Math.abs(m.VMax), Math.abs(m.VMin))) : '–'}</td><td>${d ? mm(Math.max(Math.abs(d.dMax), Math.abs(d.dMin))) : '–'}</td><td>${f.length ? f.map(r => `A${r.no}: ${fF(r.axial)}`).join('<br>') : '–'}</td></tr>`;
+      return `<tr><td class="l">${s.no}</td><td class="txt">${esc(s.desc)}</td><td>${el(g?.glActive)} / ${el(g?.glPassive)}</td><td>${fos}</td><td>${st?.toeForFos != null ? el(st.toeForFos) : '–'}</td><td>${m ? fF(m.MMax) + ' / ' + fF(m.MMin) : '–'}</td><td>${m ? fF(Math.max(Math.abs(m.VMax), Math.abs(m.VMin))) : '–'}</td><td>${d ? mm(Math.max(Math.abs(d.dMax), Math.abs(d.dMin))) : '–'}</td><td>${f.length ? f.map(r => `Strut ${r.no}: ${fF(r.perM, 2)}`).join('<br>') : '–'}</td></tr>`;
     }).join('')}</tbody></table></div>
     <p class="hint" style="margin:8px 0 0">"n/a" means WALLAP reported the stage as not suitable for a factor of safety calculation.</p>
   </div>
