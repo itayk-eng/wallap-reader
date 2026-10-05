@@ -1,0 +1,1961 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Open a WALLAP results PDF and see the wall section, loads, bending moments, shear, displacements and anchor forces. Export drawings at 1:100 as DXF or PDF.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2030%2030%22%3E%3Crect%20width%3D%2230%22%20height%3D%2230%22%20rx%3D%226%22%20fill%3D%22%231d5a82%22%2F%3E%3Cpath%20d%3D%22M4%2011h9v15H4z%22%20fill%3D%22%23dccca6%22%2F%3E%3Cpath%20d%3D%22M17%2018h9v8h-9z%22%20fill%3D%22%23dccca6%22%2F%3E%3Cpath%20d%3D%22M15%204v22%22%20stroke%3D%22%23fff%22%20stroke-width%3D%222.4%22%2F%3E%3Cpath%20d%3D%22M15%209l-8%203%22%20stroke%3D%22%23ef7a45%22%20stroke-width%3D%222%22%2F%3E%3C%2Fsvg%3E">
+<title>WALLAP Report Reader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@87,500;87,600;87,700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: drafting-sheet tool. Title block strip on top, summary tiles, then tabbed sheets (section, loads, forces, anchors, stages). */
+:root {
+  --bg: #f3f5f4;
+  --surface: #ffffff;
+  --surface-2: #eef1f0;
+  --ink: #172024;
+  --ink-2: #48545a;
+  --muted: #76828a;
+  --line: #d6dcdb;
+  --grid: #e7ebea;
+  --accent: #1d5a82;
+  --accent-ink: #ffffff;
+  --accent-soft: #dde9f2;
+  --s1: #2a78d6;           /* series 1 */
+  --s2: #eb6834;           /* series 2 */
+  --s3: #1baf7a;           /* series 3 */
+  --water: #2a78d6;
+  --anchor: #d2551f;
+  --wall: #22292c;
+  --soil-1: #ece3cf; --soil-2: #dccca6; --soil-3: #c9b387; --soil-4: #b39a6c;
+  --soil-line: #a8977a;
+  --good: #0ca30c; --warn: #b77a00; --crit: #d03b3b;
+  --font-display: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121617; --surface: #1a1f21; --surface-2: #222829; --ink: #eef2f1; --ink-2: #b9c3c4; --muted: #8b979a;
+  --line: #333b3d; --grid: #283032; --accent: #6fb0dd; --accent-ink: #0d1a22; --accent-soft: #1d3342;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --water: #4f98ec; --anchor: #ef7a45; --wall: #dfe6e6;
+  --soil-1: #36312a; --soil-2: #423a2d; --soil-3: #4f4432; --soil-4: #5c4f38; --soil-line: #6f6350;
+  --good: #2fbf2f; --warn: #e0a326; --crit: #e66767; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #121617; --surface: #1a1f21; --surface-2: #222829; --ink: #eef2f1; --ink-2: #b9c3c4; --muted: #8b979a;
+  --line: #333b3d; --grid: #283032; --accent: #6fb0dd; --accent-ink: #0d1a22; --accent-soft: #1d3342;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --water: #4f98ec; --anchor: #ef7a45; --wall: #dfe6e6;
+  --soil-1: #36312a; --soil-2: #423a2d; --soil-3: #4f4432; --soil-4: #5c4f38; --soil-line: #6f6350;
+  --good: #2fbf2f; --warn: #e0a326; --crit: #e66767; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font-body); }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 20px; padding-block: 16px 48px; display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 520px) { .wrap { padding-inline: 16px; } }
+h1, h2, h3 { font-family: var(--font-display); font-stretch: 87%; margin: 0; text-wrap: balance; letter-spacing: 0.005em; }
+.mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+button, .btn { font: 500 13px/1 var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 9px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+button:hover, .btn:hover { border-color: var(--muted); }
+button:focus-visible, .btn:focus-within, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+/* top bar */
+.topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand svg { flex: none; }
+.brand h1 { font-size: 20px; font-weight: 700; }
+.brand small { display: block; color: var(--muted); font-size: 12px; font-family: var(--font-body); font-weight: 400; letter-spacing: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--surface); }
+.seg button { border: 0; border-radius: 0; padding: 9px 11px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+
+/* title block */
+.titleblock { display: grid; grid-template-columns: minmax(0, 2.2fr) repeat(4, minmax(0, 1fr)); border: 1px solid var(--ink-2); background: var(--surface); border-radius: 2px; }
+.titleblock > div { padding: 8px 12px; border-left: 1px solid var(--line); min-width: 0; }
+.titleblock > div:first-child { border-left: 0; }
+.tb-label { font: 500 10px/1.2 var(--font-body); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.tb-val { font: 600 15px/1.35 var(--font-display); font-stretch: 87%; overflow-wrap: anywhere; }
+.tb-val.big { font-size: 22px; }
+.tb-sub { color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font: 600 11px/1 var(--font-body); padding: 4px 7px; border-radius: 99px; background: var(--surface-2); color: var(--ink-2); letter-spacing: 0.02em; white-space: nowrap; }
+.chip.example { background: var(--accent-soft); color: var(--ink); }
+.chip.good { color: var(--good); } .chip.crit { color: var(--crit); } .chip.warn { color: var(--warn); }
+@media (max-width: 860px) { .titleblock { grid-template-columns: repeat(2, minmax(0, 1fr)); } .titleblock > div:first-child { grid-column: 1 / -1; } .titleblock > div { border-top: 1px solid var(--line); } .titleblock > div:nth-child(2) { border-left: 0; } .titleblock > div:nth-child(4) { border-left: 0; } .titleblock > div:first-child { border-top: 0; } }
+
+/* KPI tiles */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.kpi .k-label { font: 500 11px/1.2 var(--font-body); text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
+.kpi .k-val { font: 600 26px/1.1 var(--font-display); font-stretch: 87%; font-variant-numeric: tabular-nums; }
+.kpi .k-val span { font: 500 12px var(--font-mono); color: var(--ink-2); margin-left: 4px; }
+.kpi .k-sub { font-size: 12px; color: var(--ink-2); }
+
+/* tabs */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tabs button { border: 0; background: none; border-radius: 0; padding: 11px 14px; font-weight: 500; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.sheet { display: flex; flex-direction: column; gap: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; min-width: 0; }
+.panel h2 { font-size: 17px; font-weight: 600; }
+.panel h3 { font-size: 14px; font-weight: 600; }
+.panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 16px; margin-bottom: 12px; }
+.hint { color: var(--muted); font-size: 12px; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+@media (max-width: 920px) { .two { grid-template-columns: minmax(0, 1fr); } }
+
+/* stage stepper */
+.stepper { display: flex; flex-wrap: wrap; gap: 6px; }
+.stepper button { flex-direction: column; align-items: flex-start; gap: 3px; padding: 7px 10px; max-width: 250px; text-align: left; }
+.stepper button b { font: 600 11px/1 var(--font-body); text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
+.stepper button span { font-size: 12px; line-height: 1.3; color: var(--ink); }
+.stepper button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); }
+.stepper button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* tables */
+.tscroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font: 600 11px/1.3 var(--font-body); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; vertical-align: bottom; }
+th small { display: block; text-transform: none; letter-spacing: 0; font-weight: 400; font-family: var(--font-mono); }
+td { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child, td.l, th.l { text-align: left; }
+td.txt { font-family: var(--font-body); white-space: normal; min-width: 200px; }
+tr.gov td { background: var(--accent-soft); font-weight: 500; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 6px; border: 1px solid var(--soil-line); }
+
+/* key list */
+.keys { display: flex; flex-direction: column; gap: 0; }
+.keys div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px dashed var(--line); }
+.keys div:last-child { border-bottom: 0; }
+.keys dt, .keys span:first-child { color: var(--ink-2); }
+.keys b { font: 500 13px var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 6px; }
+.legend i.dash { border-top-style: dashed; }
+.legend i.dot { border-top-style: dotted; }
+
+/* drawings & charts */
+.drawing { width: 100%; overflow-x: auto; }
+.drawing svg { display: block; width: 100%; height: auto; min-width: 520px; }
+svg text { font-family: var(--font-body); }
+svg .t-mono { font-family: var(--font-mono); }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+.chart { position: relative; min-width: 0; }
+.chart svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+.chart h3 { font-size: 13px; margin-bottom: 2px; }
+.chart .unit { font: 400 11px var(--font-mono); color: var(--muted); }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 5px 8px; font: 12px/1.35 var(--font-mono); box-shadow: 0 2px 8px rgb(0 0 0 / 0.12); white-space: nowrap; z-index: 2; }
+.tip b { font-weight: 500; }
+
+/* drop overlay */
+.drop { position: fixed; inset: 0; background: color-mix(in srgb, var(--bg) 82%, transparent); display: grid; place-items: center; z-index: 20; border: 3px dashed var(--accent); }
+.drop div { font: 600 22px var(--font-display); color: var(--ink); background: var(--surface); padding: 18px 26px; border-radius: var(--r); border: 1px solid var(--line); }
+.msg { border: 1px solid var(--line); border-left: 3px solid var(--warn); background: var(--surface); padding: 10px 14px; border-radius: var(--r); font-size: 13px; }
+.msg.err { border-left-color: var(--crit); }
+.msg.ok { border-left-color: var(--good); }
+
+.drawing { position: relative; }
+.drawing.compact svg { min-width: 260px; }
+.drawing .tip { z-index: 3; }
+.trio { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+.trio-item { min-width: 0; display: flex; flex-direction: column; }
+.trio-item h3 { font-size: 14px; }
+.trio-item .unit { font: 400 11px var(--font-mono); color: var(--muted); }
+table.compact th, table.compact td { padding: 6px 6px; }
+button.link { border: 0; background: none; color: var(--accent); padding: 4px 2px; text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+button.link:hover { border: 0; }
+.dz-globals { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: flex-end; }
+.dz-globals label, .dz-in label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink-2); font-weight: 500; }
+.dz-in label { flex-direction: row; gap: 6px; align-items: baseline; }
+.dz-derived { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink-2); font-weight: 500; }
+.dz-derived b { font: 600 15px/1 var(--font-mono); color: var(--ink); padding: 10px 0; }
+.u { color: var(--muted); font: 400 11px var(--font-mono); }
+input[type=number] { font: 500 14px var(--font-mono); padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); width: 104px; }
+input[type=number]:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input[type=range] { accent-color: var(--accent); width: 100%; max-width: 260px; }
+.dz-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.4fr); gap: 24px; align-items: start; }
+@media (max-width: 960px) { .dz-grid { grid-template-columns: minmax(0, 1fr); } }
+.dz-in { display: flex; flex-direction: column; gap: 6px; }
+.dz-req .k-label { font: 500 11px/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.dz-req .big { font: 600 34px/1.15 var(--font-display); font-stretch: 87%; font-variant-numeric: tabular-nums; margin: 4px 0; }
+.dz-req .big span { font: 500 12px var(--font-mono); color: var(--ink-2); margin-left: 6px; }
+.inrow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.inrow button:not(.link) { padding: 7px 12px; font-size: 16px; line-height: 1; }
+.verdict { font: 600 16px/1.3 var(--font-display); font-stretch: 87%; margin-bottom: 6px; }
+.verdict.good { color: var(--good); } .verdict.crit { color: var(--crit); }
+.meter { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+.meter i { display: block; height: 100%; background: var(--good); border-radius: 4px; }
+.meter.over i { background: var(--crit); }
+b.bad { color: var(--crit); }
+table.mx { border-collapse: separate; border-spacing: 4px; width: auto; }
+table.mx th, table.mx td { border: 0; padding: 0 6px 0 0; }
+table.mx td { padding: 0; }
+.mx-cell { width: 70px; height: 38px; justify-content: center; font: 500 12px var(--font-mono); border-radius: 4px; padding: 0; }
+.mx-cell.ok, .mx-sw.ok { background: color-mix(in srgb, var(--good) 16%, var(--surface)); border-color: color-mix(in srgb, var(--good) 40%, var(--line)); color: var(--ink); }
+.mx-cell.fail, .mx-sw.fail { background: var(--surface-2); color: var(--muted); border-color: var(--line); }
+.mx-cell.first { font-weight: 700; }
+.mx-cell.sel { outline: 2.5px solid var(--accent); outline-offset: 1px; }
+
+.exp-opts { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: flex-end; }
+.exp-opts fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.exp-opts legend { font-size: 12px; font-weight: 500; color: var(--ink-2); padding: 0; margin-bottom: 6px; }
+label.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+label.chk input { accent-color: var(--accent); width: 16px; height: 16px; }
+label.sel { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 500; color: var(--ink-2); }
+select { font: 500 13px var(--font-body); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); max-width: 100%; }
+select:focus-visible, label.chk input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.exp-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.exp-msg { min-height: 1.4em; margin: 10px 0 0; font-size: 13px; color: var(--ink-2); }
+.exp-msg.ok { color: var(--good); } .exp-msg.err { color: var(--crit); }
+.exp-notes { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; max-width: 95ch; }
+.paper-grid { display: flex; gap: 16px; align-items: flex-start; }
+@media (max-width: 760px) { .paper-grid { flex-direction: column; } .paper-grid .paper { width: 100%; } }
+.paper { margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.paper-sheet { background: #ffffff; border: 1px solid var(--line); border-radius: 3px; padding: 10px; box-shadow: 0 1px 3px rgb(0 0 0 / 0.08); }
+.paper-sheet svg { display: block; width: 100%; height: auto; }
+.paper figcaption { font-size: 12px; color: var(--ink-2); }
+
+.btn.sm { padding: 6px 9px; font-size: 12px; }
+.exp-quick { display: inline-flex; gap: 6px; margin-left: auto; }
+.panel-head .exp-quick { order: 3; }
+.trio-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--r); font-size: 13px; z-index: 30; max-width: calc(100% - 32px); box-shadow: 0 4px 16px rgb(0 0 0 / 0.2); }
+.toast.err { background: var(--crit); color: #fff; }
+
+#printArea { display: none; }
+@media print {
+  body > *:not(#printArea) { display: none !important; }
+  body { background: #ffffff !important; }
+  #printArea { display: block; }
+  .print-page { break-after: page; page-break-after: always; display: flex; flex-direction: column; align-items: flex-start; }
+  .print-page:last-child { break-after: auto; page-break-after: auto; }
+  .print-page svg { display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .print-note { font: 8pt Helvetica, Arial, sans-serif; color: #555555; margin: 2mm 0 0; }
+}
+
+.upload { display: flex; flex-direction: column; gap: 10px; }
+.dropzone { position: relative; display: flex; align-items: center; gap: 14px; padding: 12px 16px; border: 1.5px dashed var(--muted); border-radius: var(--r); background: var(--surface); cursor: pointer; color: var(--ink-2); flex-wrap: wrap; }
+.dropzone:hover, .dropzone:focus-within { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dropzone input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.dz-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 260px; min-width: 0; }
+.dz-text b { color: var(--ink); font: 600 15px/1.3 var(--font-display); font-stretch: 87%; }
+.dz-text span { font-size: 13px; }
+.dz-btn { pointer-events: none; }
+.upload.big .dropzone { padding: 28px 26px; border-width: 2px; gap: 20px; }
+.upload.big .dz-text b { font-size: 22px; }
+.upload.big .dz-text span { font-size: 14px; }
+.dz-note { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rchip { display: inline-flex; align-items: stretch; border: 1px solid var(--line); border-radius: 99px; background: var(--surface); overflow: hidden; max-width: 100%; }
+.rchip button { border: 0; border-radius: 0; background: none; padding: 6px 10px; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; display: inline-block; }
+.rchip button em { font-style: normal; color: var(--muted); font-size: 11px; margin-left: 4px; }
+.rchip .x { padding: 6px 9px 6px 4px; color: var(--muted); font-size: 14px; line-height: 1; }
+.rchip .x:hover { color: var(--crit); }
+.rchip.on { border-color: var(--accent); background: var(--accent-soft); }
+.rchip.on button:first-child { font-weight: 600; color: var(--ink); }
+.foot { color: var(--muted); font-size: 12px; max-width: 80ch; }
+.anchors-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+.acard { border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.acard .big { font: 600 28px/1 var(--font-display); font-stretch: 87%; font-variant-numeric: tabular-nums; }
+.acard .big span { font: 500 12px var(--font-mono); color: var(--ink-2); margin-left: 4px; }
+@media (prefers-reduced-motion: no-preference) { .sheet { animation: fade .18s ease-out; } @keyframes fade { from { opacity: .6; } to { opacity: 1; } } }
+</style>
+
+
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><rect x="1" y="1" width="28" height="28" rx="5" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".35"/><path d="M4 11h9v15H4z" fill="var(--soil-2)"/><path d="M17 18h9v8h-9z" fill="var(--soil-2)"/><path d="M15 4v22" stroke="var(--wall)" stroke-width="2.4"/><path d="M15 9l-8 3" stroke="var(--anchor)" stroke-width="1.8"/><path d="M4 11h9" stroke="currentColor" stroke-width="1.2"/><path d="M17 18h9" stroke="currentColor" stroke-width="1.2"/></svg>
+      <h1>WALLAP Report Reader<small>Drop a WALLAP results PDF to see the wall, loads, moments and anchor forces</small></h1>
+    </div>
+    <div class="actions">
+      <label class="btn" for="file">Open PDF<input id="file" type="file" multiple accept=".pdf,.txt,.out,.lst,.dat,application/pdf,text/plain"></label>
+      <button id="loadExample" type="button">Load example</button>
+      <div class="seg" id="unitSeg" role="group" aria-label="Units"></div>
+    </div>
+  </header>
+  <div id="msg" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="app"></div>
+</div>
+<div class="drop" id="drop" hidden><div>Drop the WALLAP PDF to read it</div></div>
+
+<script>
+// Rebuild fixed-width text lines from pdf.js text items (WALLAP prints in a monospace font)
+function itemsToLines(items){
+  const its = items.filter(i => i.str && i.str.trim() !== '' && i.width > 0);
+  // estimate character pitch
+  const pitches = {};
+  for (const i of its) if (i.str.length >= 2) { const k = (i.width / i.str.length).toFixed(2); pitches[k] = (pitches[k]||0) + i.str.length; }
+  let cw = 5.4, best = 0;
+  for (const k in pitches) if (pitches[k] > best) { best = pitches[k]; cw = +k; }
+  const mono = its.filter(i => Math.abs(i.width / i.str.length - cw) < 0.15 * cw);
+  if (!mono.length) return [];
+  const left = Math.min(...mono.map(i => i.transform[4]));
+  const rows = [];
+  for (const i of mono) {
+    const y = i.transform[5];
+    let r = rows.find(r => Math.abs(r.y - y) < 2);
+    if (!r) { r = { y, parts: [] }; rows.push(r); }
+    r.parts.push(i);
+  }
+  rows.sort((a, b) => b.y - a.y);
+  return rows.map(r => {
+    r.parts.sort((a, b) => a.transform[4] - b.transform[4]);
+    let s = '';
+    for (const p of r.parts) {
+      const col = Math.max(0, Math.round((p.transform[4] - left) / cw));
+      if (s.length < col) s += ' '.repeat(col - s.length);
+      else if (s.length > col && s.length && s[s.length-1] !== ' ') s += ' ';
+      s += p.str;
+    }
+    return s.replace(/\s+$/, '');
+  });
+}
+async function pdfToText(pdfjsLib, data){
+  const doc = await pdfjsLib.getDocument({ data, verbosity: 0 }).promise;
+  const pages = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    pages.push(itemsToLines(tc.items).join('\n'));
+  }
+  return pages.join('\n\f\n');
+}
+if (typeof module !== 'undefined') module.exports = { itemsToLines, pdfToText };
+
+// WALLAP text-report parser. Input: full text (fixed-width lines). Output: plain object.
+function parseWallap(text) {
+  const NUM = '-?\\d*\\.?\\d+(?:[Ee][-+]?\\d+)?';
+  const isNum = s => new RegExp('^' + NUM + '$').test(s);
+  const num = s => { const v = parseFloat(s); return isNaN(v) ? null : v; };
+  const raw = text.replace(/\r/g, '').split('\n');
+  const R = { meta: {}, strata: [], soils: [], water: {}, wall: {}, struts: [], surcharges: [], stages: [],
+    options: {}, results: {}, summary: { stability: [], envelope: [], stageMax: [], stageDisp: [], strutForces: [] }, warnings: [] };
+
+  // ---- header / meta, then strip repeated page headers
+  const lines = [];
+  for (const l of raw) {
+    let m;
+    if ((m = l.match(/^(.*?)\s*\|\s*Sheet No/))) { if (!R.meta.company && m[1].trim()) R.meta.company = m[1].trim(); continue; }
+    if ((m = l.match(/Program:\s*(WALLAP[^|]*)/))) { R.meta.program = R.meta.program || m[1].replace(/\s+/g, ' ').trim(); }
+    if ((m = l.match(/Job No\.?\s*(.+)$/))) { R.meta.job = R.meta.job || m[1].trim(); }
+    if ((m = l.match(/Made by\s*:\s*(\S*)/))) { R.meta.madeBy = R.meta.madeBy || m[1]; }
+    if ((m = l.match(/Run ID[.:]?\s*(.+?)\s*(\||$)/))) { R.meta.runId = R.meta.runId || m[1].trim(); }
+    if ((m = l.match(/^(.*?)\s*\|\s*Checked/))) { if (!R.meta.title && m[1].trim()) R.meta.title = m[1].trim(); continue; }
+    if ((m = l.match(/Units:\s*(\S+)/))) { R.meta.units = R.meta.units || m[1]; continue; }
+    if (/Program:\s*WALLAP|Licensed from|Data filename|^\s*Run ID|^-{30,}\s*$|^\s*\(continued\)\s*$|\|\s*$|^\f$/.test(l)) continue;
+    if (/^Program WALLAP - Copyright|Rodenhurst Road/.test(l)) continue;
+    lines.push(l);
+  }
+  const units = (R.meta.units || 't,m').split(',');
+  R.meta.forceUnit = units[0] || 't';
+  R.meta.lengthUnit = units[1] || 'm';
+
+  const HEAD = /^[A-Z][A-Z ,&/-]{4,}$/; // all-caps section headings
+  const find = (re, from = 0) => { for (let i = from; i < lines.length; i++) if (re.test(lines[i])) return i; return -1; };
+  const toks = l => l.trim().split(/\s+/);
+  const sectionRows = (start) => { const out = []; for (let i = start + 1; i < lines.length; i++) { const l = lines[i]; if (HEAD.test(l.trim()) && !/^\s/.test(l)) break; out.push(l); } return out; };
+
+  // ---- SOIL PROFILE
+  let i = find(/^SOIL PROFILE/);
+  if (i >= 0) for (const l of sectionRows(i)) {
+    const m = l.match(new RegExp('^\\s*(\\d+)\\s+(' + NUM + ')\\s+(\\d+)\\s+(.+?)\\s{2,}(\\d+)\\s+(.+?)\\s*$'));
+    if (m) R.strata.push({ no: +m[1], top: num(m[2]), activeSoil: +m[3], activeName: m[4].trim(), passiveSoil: +m[5], passiveName: m[6].trim() });
+  }
+  // ---- SOIL PROPERTIES
+  i = find(/^SOIL PROPERTIES/);
+  if (i >= 0) { const rows = sectionRows(i); for (let k = 0; k < rows.length; k++) {
+    const m = rows[k].match(new RegExp('^\\s*(\\d+)\\s+(.+?)\\s+(' + NUM + ')a\\s+(' + NUM + ')\\s+(' + NUM + ')\\s+(OC|NC)\\s+(' + NUM + ')\\s+(' + NUM + ')(?:\\s+(' + NUM + '))?'));
+    if (!m) continue;
+    const s = { no: +m[1], name: m[2].trim(), gammaAbove: num(m[3]), E: num(m[4]), K0: num(m[5]), consol: m[6], Ka: num(m[7]), Kp: num(m[8]), c: m[9] ? num(m[9]) : 0 };
+    const n = rows[k + 1] || '';
+    const b = n.match(new RegExp('(' + NUM + ')b'));
+    if (b) { s.gammaBelow = num(b[1]); const p = [...n.matchAll(new RegExp('\\(\\s*(' + NUM + ')\\s*\\)', 'g'))].map(x => num(x[1])); s.nu = p[0]; s.Kac = p[1]; s.Kpc = p[2]; }
+    R.soils.push(s);
+  } }
+  // ---- Additional parameters (friction angles)
+  i = find(/^Additional soil parameters/);
+  if (i >= 0) for (const l of sectionRows(i)) {
+    const m = l.match(new RegExp('^\\s*(\\d+)\\s+(.+?)\\s+(' + NUM + ')\\s+(' + NUM + ')\\s+(' + NUM + ')\\s+(' + NUM + ')\\s+(' + NUM + ')\\s+(' + NUM + ')\\s*$'));
+    if (m) { const s = R.soils.find(x => x.no === +m[1]); if (s) Object.assign(s, { phiA: num(m[3]), adhA: num(m[4]), backA: num(m[5]), phiP: num(m[6]), adhP: num(m[7]), backP: num(m[8]) }); }
+  }
+  // ---- Water
+  let m = text.match(new RegExp('Density of water\\s*=\\s*(' + NUM + ')')); if (m) R.water.density = num(m[1]);
+  m = text.match(new RegExp('Initial water table elevation\\s+(' + NUM + ')\\s+(' + NUM + ')'));
+  if (m) { R.water.active = num(m[1]); R.water.passive = num(m[2]); }
+  m = text.match(/Automatic water pressure balancing at toe of wall\s*:\s*(\w+)/); if (m) R.water.balancing = m[1];
+  // ---- Wall
+  const grab = (re, key, obj = R.wall, asText) => { const mm = text.match(re); if (mm) obj[key] = asText ? mm[1].trim() : num(mm[1]); };
+  grab(/Type of structure\s*=\s*(.+)/, 'type', R.wall, true);
+  grab(new RegExp('Elevation of toe of wall\\s*=\\s*(' + NUM + ')'), 'toe');
+  grab(new RegExp('Youngs modulus of wall E\\s*=\\s*(' + NUM + ')'), 'E');
+  grab(new RegExp('Moment of inertia of wall I\\s*=\\s*(' + NUM + ')'), 'I');
+  grab(new RegExp('E\\.I\\s*=\\s*(' + NUM + ')'), 'EI');
+  grab(/Yield Moment of wall\s*=\s*(.+)/, 'yieldMoment', R.wall, true);
+  // ---- Struts & anchors
+  i = find(/^STRUTS and ANCHORS/);
+  if (i >= 0) for (const l of sectionRows(i)) {
+    const t = toks(l);
+    if (t.length >= 8 && /^\d+$/.test(t[0]) && isNum(t[1]) && /^(Yes|No)$/i.test(t[t.length - 1])) {
+      const n = t.slice(1, -1).map(num);
+      const s = { no: +t[0], elev: n[0], spacing: n[1], area: n[2], E: n[3], tension: t[t.length - 1] };
+      if (n.length >= 7) { s.freeLength = n[4]; s.incl = n[5]; s.prestress = n[6]; }
+      else if (n.length === 6) { s.freeLength = n[4]; s.incl = n[5]; s.prestress = 0; }
+      R.struts.push(s);
+    }
+  }
+  // ---- Surcharges
+  i = find(/^SURCHARGE LOADS/);
+  if (i >= 0) for (const l of sectionRows(i)) {
+    const mm = l.match(new RegExp('^\\s*(\\d+)\\s+(' + NUM + ')\\s+(' + NUM + ')\\((A|P)\\)\\s+(.*)$'));
+    if (!mm) continue;
+    const rest = toks(mm[5]);
+    const s = { no: +mm[1], elev: num(mm[2]), dist: num(mm[3]), side: mm[4] === 'A' ? 'active' : 'passive' };
+    // length, width may be blank for infinite strip; last three tokens: far edge, equiv soil, partial factor
+    const numsBefore = []; for (const t of rest) { if (isNum(t)) numsBefore.push(num(t)); else break; }
+    if (numsBefore.length >= 3) { s.length = numsBefore[0]; s.width = numsBefore[1]; s.qNear = numsBefore[2]; if (numsBefore.length >= 4) s.qFar = numsBefore[3]; }
+    else if (numsBefore.length === 1) s.qNear = numsBefore[0];
+    else if (numsBefore.length === 2) { s.width = numsBefore[0]; s.qNear = numsBefore[1]; }
+    if (s.qFar == null) s.qFar = s.qNear;
+    R.surcharges.push(s);
+  }
+  // ---- Construction stages
+  i = find(/^CONSTRUCTION STAGES/);
+  if (i >= 0) for (const l of sectionRows(i)) {
+    const mm = l.match(/^\s*(\d+)\s{2,}(\S.*?)\s*$/);
+    if (mm) R.stages.push({ no: +mm[1], desc: mm[2] });
+  }
+  // ---- Options
+  grab(new RegExp('Length of wall \\(normal to plane of analysis\\)\\s*=\\s*(' + NUM + ')'), 'wallLength', R.options);
+  grab(new RegExp('Elevation of rigid lower boundary\\s*=\\s*(' + NUM + ')'), 'lowerBoundary', R.options);
+  grab(new RegExp('Factor on soil strength for calculating wall depth\\s*=\\s*(' + NUM + ')'), 'fosTarget', R.options);
+  grab(/Method of analysis\s*-\s*(.+)/, 'stabilityMethod', R.options, true);
+  grab(/Bending moment and displacement calculation:\s*\n\s*Method\s*-\s*(.+)/, 'bmMethod', R.options, true);
+
+  // ---- Per-stage detailed results + summary
+  const stabRow = (l) => {
+    const mm = l.match(new RegExp('^\\s*(\\d+)\\s+(' + NUM + ')\\s+(' + NUM + ')\\s+(Cant\\.|' + NUM + ')\\s+(.*)$'));
+    if (!mm) return null;
+    const o = { stage: +mm[1], glActive: num(mm[2]), glPassive: num(mm[3]), strutElev: mm[4] === 'Cant.' ? null : num(mm[4]) };
+    const rest = mm[5].trim();
+    if (/Conditions not suitable/i.test(rest)) o.note = 'Not suitable for FoS calc.';
+    else { const t = toks(rest); o.fos = num(t[0]); o.momentElev = t[1] === 'n/a' ? null : num(t[1]); o.toeForFos = num(t[2]); o.penetration = num(t[3]); }
+    return o;
+  };
+  let stage = null, inSummary = false;
+  for (let k = 0; k < lines.length; k++) {
+    const l = lines[k];
+    let mm;
+    if (/^Summary of results/.test(l)) { inSummary = true; stage = null; continue; }
+    if ((mm = l.match(/^Stage No\.\s*(\d+)\s+(.*)$/))) {
+      const no = +mm[1];
+      if (!R.results[no]) R.results[no] = { no, desc: mm[2].trim(), nodes: [], active: [], passive: [], strutForces: [] };
+      stage = R.results[no]; inSummary = false; continue;
+    }
+    if (/^STABILITY ANALYSIS/.test(l)) {
+      for (let j = k + 1; j < lines.length && j < k + 20; j++) {
+        const o = stabRow(lines[j]);
+        if (o) { if (inSummary) R.summary.stability.push(o); else if (stage) stage.stability = o; }
+        else if (/^BENDING MOMENT|^Summary|^Stage No/.test(lines[j])) break;
+      }
+      continue;
+    }
+    if (stage && /^\s*Node\s+Y\s+Nett/.test(l)) {
+      let last = null;
+      for (k = k + 1; k < lines.length; k++) {
+        const r = lines[k]; if (!r.trim()) continue;
+        if (/^\s*(no\.|t\/m2|coord)/.test(r) || /^\s+t\/m2/.test(r)) continue;
+        const t = toks(r);
+        if ((mm = r.match(new RegExp('At elev\\.\\s*(' + NUM + ')\\s*Strut force\\s*=\\s*(' + NUM + ')\\s*\\S*\\/strut\\s*=\\s*(' + NUM + ')')))) {
+          const sf = { elev: num(mm[1]), perStrut: num(mm[2]), perM: num(mm[3]) };
+          const nx = lines[k + 1] || ''; const mi = nx.match(new RegExp('=\\s*(' + NUM + ').*inclined'));
+          if (mi) { sf.perMInclined = num(mi[1]); k++; }
+          stage.strutForces.push(sf); continue;
+        }
+        if (t.every(isNum) && /^\d+$/.test(t[0]) && t.length >= 7) {
+          last = { node: +t[0], y: num(t[1]), nett: num(t[2]), disp: num(t[3]), rot: num(t[4]), V: num(t[5]), M: num(t[6]) };
+          if (t[7] != null) last.strut = num(t[7]);
+          stage.nodes.push(last); continue;
+        }
+        if (t.every(isNum) && t.length >= 5 && t.length <= 6 && last) {
+          stage.nodes.push({ node: last.node, y: last.y, nett: num(t[0]), disp: num(t[1]), rot: num(t[2]), V: num(t[3]), M: num(t[4]), sub: true }); continue;
+        }
+        k--; break;
+      }
+      continue;
+    }
+    if (stage && /-{5,}\s*(ACTIVE|PASSIVE) side\s*-{5,}/.test(l)) {
+      const side = /ACTIVE/.test(l) ? 'active' : 'passive';
+      let last = null;
+      for (k = k + 1; k < lines.length; k++) {
+        const r = lines[k]; if (!r.trim()) continue;
+        if (/^\s*(no\.|coord|Water|t\/m)/.test(r) || /Effective stresses|press\.|t\/m2\s+t\/m2/.test(r)) continue;
+        const t = toks(r);
+        const clean = t.map(x => x.replace(/[apA]$/, ''));
+        const flag = (t.find(x => /\d[apA]$/.test(x)) || '').slice(-1) || null;
+        if (clean.every(isNum) && /^\d+$/.test(t[0]) && t.length === 9) {
+          last = { node: +t[0], y: num(t[1]), water: num(clean[2]), vert: num(clean[3]), alim: num(clean[4]), plim: num(clean[5]), earth: num(clean[6]), total: num(clean[7]), k: num(clean[8]), flag };
+          stage[side].push(last); continue;
+        }
+        if (clean.every(isNum) && t.length === 7 && last) {
+          stage[side].push({ node: last.node, y: last.y, water: num(clean[0]), vert: num(clean[1]), alim: num(clean[2]), plim: num(clean[3]), earth: num(clean[4]), total: num(clean[5]), k: num(clean[6]), flag, sub: true }); continue;
+        }
+        k--; break;
+      }
+      continue;
+    }
+    if (inSummary && /^Bending moment, shear force and displacement envelopes/.test(l)) {
+      for (k = k + 1; k < lines.length; k++) {
+        const t = toks(lines[k]); if (!lines[k].trim() || !/^\d+$/.test(t[0])) { if (R.summary.envelope.length && /^[A-Z]/.test(lines[k])) { k--; break; } continue; }
+        if (t.length === 8 && t.every(isNum)) R.summary.envelope.push({ node: +t[0], y: num(t[1]), dMax: num(t[2]), dMin: num(t[3]), MMax: num(t[4]), MMin: num(t[5]), VMax: num(t[6]), VMin: num(t[7]) });
+      }
+      continue;
+    }
+    if (inSummary && /^Maximum and minimum bending moment and shear force at each stage/.test(l)) {
+      for (k = k + 1; k < lines.length; k++) {
+        const t = toks(lines[k]); if (!lines[k].trim()) continue;
+        if (t.length === 9 && t.every(isNum) && /^\d+$/.test(t[0])) { R.summary.stageMax.push({ stage: +t[0], MMax: num(t[1]), MMaxElev: num(t[2]), MMin: num(t[3]), MMinElev: num(t[4]), VMax: num(t[5]), VMaxElev: num(t[6]), VMin: num(t[7]), VMinElev: num(t[8]) }); continue; }
+        if (/^[A-Z]/.test(lines[k]) && R.summary.stageMax.length) { k--; break; }
+      }
+      continue;
+    }
+    if (inSummary && /^Maximum and minimum displacement at each stage/.test(l)) {
+      for (k = k + 1; k < lines.length; k++) {
+        const mm2 = lines[k].match(new RegExp('^\\s*(\\d+)\\s+(' + NUM + ')\\s+(' + NUM + ')\\s+(' + NUM + ')\\s+(' + NUM + ')\\s+(.*)$'));
+        if (mm2) { R.summary.stageDisp.push({ stage: +mm2[1], dMax: num(mm2[2]), dMaxElev: num(mm2[3]), dMin: num(mm2[4]), dMinElev: num(mm2[5]), desc: mm2[6].trim() }); continue; }
+        if (!lines[k].trim() || /^\s*(no\.|m\s|Stage)/.test(lines[k]) || /^\s+m\s+m/.test(lines[k])) continue;
+        if (R.summary.stageDisp.length) { k--; break; }
+      }
+      continue;
+    }
+    if (inSummary && /^Strut forces at each stage/.test(l)) {
+      // column headers: "--- Strut no. N ---" and "at elev. X"
+      const cols = [];
+      for (k = k + 1; k < lines.length; k++) {
+        const r = lines[k];
+        if (/Strut no\./.test(r)) { for (const x of r.matchAll(/-*\s*Strut no\.\s*(\d+)\s*-*/g)) cols.push({ no: +x[1], start: x.index, end: x.index + x[0].length }); continue; }
+        if (/at elev\./.test(r)) { let c = 0; for (const x of r.matchAll(new RegExp('at elev\\.\\s*(' + NUM + ')', 'g'))) { if (cols[c]) cols[c].elev = num(x[1]); c++; } continue; }
+        if (/t\/m run|t\/strut|kN\/m/.test(r)) continue;
+        const mm2 = r.match(/^\s*(\d+)\s+(.*)$/);
+        if (mm2 && cols.length) {
+          const row = { stage: +mm2[1], forces: {} };
+          const re = new RegExp(NUM, 'g'); let x; const body = r;
+          const pieces = []; while ((x = re.exec(body))) pieces.push({ v: num(x[0]), end: x.index + x[0].length, start: x.index });
+          pieces.shift(); // stage number
+          // pair values into columns by position: each strut column spans [start, end]; two values each (per m, per strut)
+          for (const p of pieces) {
+            let best = null, bd = 1e9;
+            for (const c of cols) { const d = p.end < c.start ? c.start - p.end : p.start > c.end + 2 ? p.start - c.end : 0; if (d < bd) { bd = d; best = c; } }
+            if (!best) continue;
+            const f = row.forces[best.no] || (row.forces[best.no] = {});
+            if (f.perM == null) f.perM = p.v; else f.perStrut = p.v;
+          }
+          R.summary.strutForces.push(row); continue;
+        }
+        if (!r.trim()) { if (R.summary.strutForces.length) break; continue; }
+        if (/^[A-Z]/.test(r)) { k--; break; }
+      }
+      R.summary.strutCols = cols.map(c => ({ no: c.no, elev: c.elev }));
+      continue;
+    }
+  }
+
+  // ---- Derived: stage-by-stage geometry state
+  const top = R.strata.length ? Math.max(...R.strata.map(s => s.top)) : (Object.values(R.results)[0]?.nodes[0]?.y ?? 0);
+  R.derived = { wallTop: Object.values(R.results)[0]?.nodes[0]?.y ?? top, groundTop: top };
+  let st = { glActive: top, glPassive: top, struts: [], surcharges: [], waterActive: R.water.active, waterPassive: R.water.passive, notes: [] };
+  R.derived.stageState = [];
+  for (const s of R.stages) {
+    st = JSON.parse(JSON.stringify(st)); st.notes = [];
+    const d = s.desc;
+    let q;
+    if ((q = d.match(new RegExp('Excavate to elevation\\s*(' + NUM + ')\\s*on\\s*(PASSIVE|ACTIVE)', 'i')))) { if (/PASSIVE/i.test(q[2])) st.glPassive = num(q[1]); else st.glActive = num(q[1]); }
+    else if ((q = d.match(new RegExp('Fill to elevation\\s*(' + NUM + ')\\s*on\\s*(PASSIVE|ACTIVE)', 'i')))) { if (/PASSIVE/i.test(q[2])) st.glPassive = num(q[1]); else st.glActive = num(q[1]); }
+    else if ((q = d.match(/Install strut or anchor no\.\s*(\d+)/i))) { if (!st.struts.includes(+q[1])) st.struts.push(+q[1]); }
+    else if ((q = d.match(/Remove strut or anchor no\.\s*(\d+)/i))) { st.struts = st.struts.filter(x => x !== +q[1]); }
+    else if ((q = d.match(/Apply surcharge no\.\s*(\d+)/i))) { if (!st.surcharges.includes(+q[1])) st.surcharges.push(+q[1]); }
+    else if ((q = d.match(/Remove surcharge no\.\s*(\d+)/i))) { st.surcharges = st.surcharges.filter(x => x !== +q[1]); }
+    else st.notes.push('Stage action not drawn: ' + d);
+    const res = R.results[s.no];
+    if (res && res.stability) { st.glActive = res.stability.glActive; st.glPassive = res.stability.glPassive; }
+    const sm = R.summary.stability.find(x => x.stage === s.no);
+    if (sm) { st.glActive = sm.glActive; st.glPassive = sm.glPassive; }
+    st.stage = s.no; st.desc = s.desc;
+    R.derived.stageState.push(st);
+  }
+  if (!R.stages.length) R.warnings.push('No construction stages found. Is this a WALLAP report?');
+  if (!Object.keys(R.results).length && !R.summary.envelope.length) R.warnings.push('No bending moment results found in this report.');
+  return R;
+}
+if (typeof module !== 'undefined') module.exports = { parseWallap };
+
+const SAMPLE_TEXT = "Example Engineering Ltd.                   | Sheet No.\nProgram: WALLAP  Version 6.05  Revision A45.B58.R49         | Job No. 0000-00\n                             Licensed from GEOSOLVE         | Made by :   XX\nData filename/Run ID: Example A-A                     |\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                       Units: t,m\nINPUT DATA\nSOIL PROFILE\nStratum   Elevation of    ------------------ Soil types -------------------\n  no.    top of stratum   Active side               Passive side\n   1          24.50       1  FILL                   1  FILL\n   2          24.00       2  CL-SC-SM               2  CL-SC-SM\n   3          -8.00       3  K1-K3                  3  K1-K3\nSOIL PROPERTIES\n                  Bulk    Young's   At rest  Consol  Active  Passive\n-- Soil type --  density  Modulus    coeff.  state.  limit    limit   Cohesion\nNo. Description   t/m3   Eh,t/m2      Ko     NC/OC    Ka       Kp      t/m2\n  (Datum elev.)          (dEh/dy ) (dKo/dy) (  Nu ) ( Kac ) (  Kpc ) ( dc/dy )\n 1  FILL          1.600a     2000    0.609     OC    0.409    2.283\n                  1.700b                    (0.300) (0.000) ( 0.000)\n 2  CL-SC-SM      1.800a     2900    0.500     OC    0.308    3.000\n                  1.900b                    (0.300) (0.000) ( 0.000)\n 3  K1-K3         2.000a     6500    0.398     OC    0.228    4.023\n                  2.100b                    (0.300) (0.000) ( 0.000)\n    Note:  (a) and (b) are Bulk Densities above and below the water table\nAdditional soil parameters associated with Ka and Kp\n                          --- parameters for Ka ---  --- parameters for Kp ---\n                            Soil      Wall    Back-    Soil      Wall    Back-\n------- Soil type ------- friction  adhesion  fill   friction  adhesion  fill\nNo. Description             angle    coeff.   angle    angle    coeff.   angle\n 1  FILL                    23.00    0.285    0.00     23.00    0.000    0.00\n 2  CL-SC-SM                30.00    0.274    0.00     30.00    0.000    0.00\n 3  K1-K3                   37.00    0.260    0.00     37.00    0.000    0.00\nGROUND WATER CONDITIONS\n Density of water = 1.000 t/m3\n                                  Active side    Passive side\n Initial water table elevation        5.00            5.00\n Automatic water pressure balancing at toe of wall : Yes\nWALL PROPERTIES\n                         Type of structure = Fully Embedded Wall\n                  Elevation of toe of wall =  7.00\n             Maximum finite element length =  1.00 m\n                  Youngs modulus of wall E = 2.6200E+06 t/m2\n               Moment of inertia of wall I = 0.021845 m4/m run\n                                       E.I = 57234 t.m2/m run\n                      Yield Moment of wall = Not defined\nSTRUTS and ANCHORS\nStrut/                 X-section                   Inclin    Pre-\nanchor         Strut     area      Youngs    Free  -ation   stress  Tension\n no.   Elev.  spacing  of strut    modulus  length (degs)   /strut  allowed\n                 m       sq.m        t/m2     m                t\n  1    21.00    1.00   0.000600  2.000E+07  10.00   15.00    18.00    No\n\f\nSURCHARGE LOADS\nSurch         Distance   Length    Width        Surcharge      Equiv. Partial\n-arge           from    parallel  perpend. -----  t/m2   -----  soil  factor/\n no.   Elev.    wall    to wall   to wall  Near edge  Far edge  type  Category\n  1    24.50    1.00(A)    5.00      5.00      1.50     =       N/A     N/A\n    Note: A = Active side,  P = Passive side\nCONSTRUCTION STAGES\nConstruction   Stage description\n  stage no.    --------------------------------------------------------\n      1        Apply surcharge no.1 at elevation 24.50\n      2        Excavate to elevation 20.50 on PASSIVE side\n      3        Install strut or anchor no.1 at elevation 21.00\n      4        Excavate to elevation 14.00 on PASSIVE side\nFACTORS OF SAFETY and ANALYSIS OPTIONS\n   Stability analysis:\n      Method of analysis  -  Strength Factor method\n      Factor on soil strength for calculating wall depth = 1.50\n   Parameters for undrained strata:\n      Minimum equivalent fluid density             =   0.50 t/m3\n      Maximum depth of water filled tension crack  =   0.00 m\n   Bending moment and displacement calculation:\n      Method  -  2-D finite element model\n      Open Tension Crack analysis? - No\n      Soil arching modelled?  -  Yes\n      Non-linear Modulus Parameter (L) = 17.50 m\n   Boundary conditions:\n      Length of wall (normal to plane of analysis) = 20.00 m\n      Width of excavation on active  side of wall  = 20.00 m\n      Width of excavation on passive side of wall  = 20.00 m\n      Distance to rigid boundary on active side  = 20.00 m\n      Distance to rigid boundary on passive side = 20.00 m\n      Elevation of rigid lower boundary = 4.00\n      Lower rigid boundary at elevation 4.00 - Rough\n      Rigid boundary on active side           - Rough\n      Rigid boundary on passive side          - Rough\n      Wall / soil interface                   - Rough\nOUTPUT OPTIONS\n Stage ------ Stage description ----------- ------- Output options -------\n  no.                                       Displacement   Active,  Graph.\n                                            Bending mom.   Passive  output\n                                            Shear force   pressures\n   1 Apply surcharge no.1 at elev. 24.50        Yes          Yes     Yes\n   2 Excav. to elev. 20.50 on PASSIVE side      Yes          Yes     Yes\n   3 Install strut no.1 at elev. 21.00           No           No      No\n   4 Excav. to elev. 14.00 on PASSIVE side       No           No      No\n   * Summary output                             Yes           -      Yes\nProgram WALLAP - Copyright (C) 2013 by DL Borin,  distributed by GEOSOLVE\n                 69 Rodenhurst Road, London SW4, UK.  Tel: +44 20 8674 7251\n\f\nExample Engineering Ltd.                   | Sheet No.\nProgram: WALLAP  Version 6.05  Revision A45.B58.R49         | Job No. 0000-00\n                             Licensed from GEOSOLVE         | Made by :   XX\nData filename/Run ID: Example A-A                     |\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                       Units: t,m\nINPUT DATA\n\f\nExample Engineering Ltd.                   | Sheet No.\nProgram: WALLAP  Version 6.05  Revision A45.B58.R49         | Job No. 0000-00\n                             Licensed from GEOSOLVE         | Made by :   XX\nData filename/Run ID: Example A-A                     |\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                       Units: t,m\nStage No. 2   Excavate to elevation 20.50 on PASSIVE side\nSTABILITY ANALYSIS of Fully Embedded Wall according to Strength Factor method\n Factor of safety on soil strength\n                                FoS for toe       Toe elev. for\n                               elev. =    7.00     FoS = 1.500\n                               ---------------    -------------\n Stage  --- G.L. ---   Strut   Factor  Moment      Toe    Wall\n  No.   Act.   Pass.    Elev.    of    equilib.   elev.  Penetr\n                               Safety  at elev.          -ation\n   2   24.50   20.50    Cant.   2.690     8.66    13.68    6.82\nBENDING MOMENT and DISPLACEMENT ANALYSIS of Fully Embedded Wall\n  Analysis options\n  Length of wall perpendicular to section = 20.00m\n  2-D finite element model.    Soil arching modelled.\n  Soil deformations are elastic until the active or passive limit is reached\n  Open Tension Crack analysis - No\n  All soil moduli were factored to take account of\n  3-D effects due to the finite length of wall:\n                Modulus factors - active side = 1.07\n                                 passive side = 1.06\n  Rigid boundaries:     Active side 20.00 from wall      Rough boundary\n                       Passive side 20.00 from wall      Rough boundary\n  Lower rigid boundary at elevation 4.00                 Rough boundary\nNode    Y      Nett       Wall      Wall      Shear   Bending   Strut\n no.  coord  pressure     disp.   rotation    force   moment    forces\n                 t/m2       m       rad.        t/m     t.m/m     t/m\n  1   24.50      0.00     0.027   2.43E-03      0.0       0.0\n  2   24.00      0.35     0.026   2.43E-03      0.1       0.0\n                 0.26     0.026   2.43E-03      0.1       0.0\n  3   23.00      0.93     0.023   2.43E-03      0.7       0.4\n  4   22.00      1.54     0.021   2.41E-03      1.9       1.7\n  5   21.00      2.10     0.018   2.35E-03      3.7       4.6\n  6   20.50      2.37     0.017   2.30E-03      4.9       6.7\n  7   19.75     -1.28     0.016   2.19E-03      5.3      11.0\n  8   19.00     -3.53     0.014   2.02E-03      3.5      14.6\n  9   18.00     -2.54     0.012   1.75E-03      0.4      16.2\n 10   17.00     -1.30     0.011   1.47E-03     -1.5      15.4\n 11   16.00     -0.46     0.009   1.22E-03     -2.4      13.3\n 12   15.00      0.02     0.008   1.02E-03     -2.6      10.7\n 13   14.00      0.27     0.007   8.56E-04     -2.4       8.1\n 14   13.00      0.38     0.006   7.35E-04     -2.1       5.8\n 15   12.00      0.41     0.006   6.51E-04     -1.7       3.9\n 16   11.00      0.40     0.005   5.97E-04     -1.3       2.3\n 17   10.00      0.38     0.004   5.66E-04     -0.9       1.2\n 18    9.00      0.35     0.004   5.51E-04     -0.5       0.5\n 19    8.00      0.27     0.003   5.46E-04     -0.2       0.1\n 20    7.00      0.17     0.003   5.45E-04     -0.0       0.0\n 21    6.75      0.04     0.003          0      0.0       0.0\n 22    4.00     -0.04     0.000          0      0.0       0.0\n\f\nRun ID. Example A-A                                   | Sheet No.\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                              (continued)\nStage No.2   Excavate to elevation 20.50 on PASSIVE side\nNode    Y    ------------------------ ACTIVE side ---------------------------\n no.  coord          ------- Effective stresses -------    Total     Soil\n             Water   Vertic  Active   Passive    Earth     earth   stiffness\n             press.    -al   limit     limit   pressure   pressure   coeff.\n               t/m2    t/m2    t/m2      t/m2     t/m2       t/m2      t/m3\n  1   24.50    0.00    0.00    0.00      0.00     0.00       0.00      2142\n  2   24.00    0.00    0.86    0.35      1.96     0.35       0.35a     2142\n               0.00    0.86    0.26      2.57     0.26       0.26a     3106\n  3   23.00    0.00    3.03    0.93      9.10     0.93       0.93a     3106\n  4   22.00    0.00    5.00    1.54     15.01     1.54       1.54a     3106\n  5   21.00    0.00    6.81    2.10     20.44     2.10       2.10a     3106\n  6   20.50    0.00    7.69    2.37     23.07     2.37       2.37a     3106\n  7   19.75    0.00    8.99    2.77     26.98     2.77       2.77a     3106\n  8   19.00    0.00   10.29    3.17     30.87     3.17       3.17a     3106\n  9   18.00    0.00   12.02    3.70     36.07     3.70       3.70a     3106\n 10   17.00    0.00   13.77    4.23     41.30     4.92       4.92      3106\n 11   16.00    0.00   15.51    4.77     46.54     6.12       6.12      3106\n 12   15.00    0.00   17.27    5.31     51.82     7.17       7.17      3106\n 13   14.00    0.00   19.04    5.86     57.11     8.14       8.14      3106\n 14   13.00    0.00   20.81    6.40     62.42     9.06       9.06      3106\n 15   12.00    0.00   22.58    6.95     67.74     9.96       9.96      3106\n 16   11.00    0.00   24.36    7.49     73.08    10.85      10.85      3106\n 17   10.00    0.00   26.14    8.04     78.43    11.73      11.73      3106\n 18    9.00    0.00   27.93    8.59     83.78    12.62      12.62      3106\n 19    8.00    0.00   29.71    9.14     89.14    13.50      13.50      3106\n 20    7.00    0.00   31.50    9.69     94.51    14.36      14.36      3106\n 21    6.75    0.00   31.95    9.83     95.85    14.53      14.53      3106\n 22    4.00    1.00   35.88   11.04    107.63    16.57      17.57      3106\nNode    Y    ----------------------- PASSIVE side ---------------------------\n no.  coord          ------- Effective stresses -------    Total     Soil\n             Water   Vertic  Active   Passive    Earth     earth   stiffness\n             press.    -al   limit     limit   pressure   pressure   coeff.\n               t/m2    t/m2    t/m2      t/m2     t/m2       t/m2      t/m3\n  1   24.50    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  2   24.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  3   23.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  4   22.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  5   21.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  6   20.50    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n               0.00    0.00    0.00      0.00     0.00       0.00      3084\n  7   19.75    0.00    1.35    0.42      4.05     4.05       4.05p     3084\n  8   19.00    0.00    2.70    0.83      8.10     6.69       6.69      3084\n  9   18.00    0.00    4.51    1.39     13.52     6.24       6.24      3084\n 10   17.00    0.00    6.32    1.94     18.95     6.22       6.22      3084\n 11   16.00    0.00    8.13    2.50     24.40     6.57       6.57      3084\n 12   15.00    0.00    9.96    3.06     29.87     7.15       7.15      3084\n 13   14.00    0.00   11.79    3.63     35.38     7.87       7.87      3084\n 14   13.00    0.00   13.64    4.19     40.91     8.68       8.68      3084\n 15   12.00    0.00   15.49    4.77     46.47     9.55       9.55      3084\n 16   11.00    0.00   17.35    5.34     52.06    10.44      10.44      3084\n 17   10.00    0.00   19.22    5.91     57.67    11.35      11.35      3084\n 18    9.00    0.00   21.11    6.49     63.32    12.28      12.28      3084\n 19    8.00    0.00   22.99    7.07     68.98    13.23      13.23      3084\n 20    7.00    0.00   24.89    7.66     74.66    14.19      14.19      3084\n 21    6.75    0.00   25.36    7.80     76.09    14.49      14.49      3084\n 22    4.00    1.00   29.60    9.11     88.80    16.61      17.61      3084\nNote:      3.70a  Soil pressure at active limit\n           4.05p  Soil pressure at passive limit\n\f\n\n\f\nExample Engineering Ltd.                   | Sheet No.\nProgram: WALLAP  Version 6.05  Revision A45.B58.R49         | Job No. 0000-00\n                             Licensed from GEOSOLVE         | Made by :   XX\nData filename/Run ID: Example A-A                     |\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                       Units: t,m\nINPUT DATA\n\f\nExample Engineering Ltd.                   | Sheet No.\nProgram: WALLAP  Version 6.05  Revision A45.B58.R49         | Job No. 0000-00\n                             Licensed from GEOSOLVE         | Made by :   XX\nData filename/Run ID: Example A-A                     |\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                       Units: t,m\nINPUT DATA\n\f\nExample Engineering Ltd.                   | Sheet No.\nProgram: WALLAP  Version 6.05  Revision A45.B58.R49         | Job No. 0000-00\n                             Licensed from GEOSOLVE         | Made by :   XX\nData filename/Run ID: Example A-A                     |\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                       Units: t,m\nStage No. 4   Excavate to elevation 14.00 on PASSIVE side\nSTABILITY ANALYSIS of Fully Embedded Wall according to Strength Factor method\n Factor of safety on soil strength\n                                FoS for toe       Toe elev. for\n                               elev. =    7.00     FoS = 1.500\n                               ---------------    -------------\n Stage  --- G.L. ---   Strut   Factor  Moment      Toe    Wall\n  No.   Act.   Pass.    Elev.    of    equilib.   elev.  Penetr\n                               Safety  at elev.          -ation\n   4   24.50   14.00    21.00   1.609     n/a      7.67    6.33\nBENDING MOMENT and DISPLACEMENT ANALYSIS of Fully Embedded Wall\n  Analysis options\n  Length of wall perpendicular to section = 20.00m\n  2-D finite element model.    Soil arching modelled.\n  Soil deformations are elastic until the active or passive limit is reached\n  Open Tension Crack analysis - No\n  All soil moduli were factored to take account of\n  3-D effects due to the finite length of wall:\n                Modulus factors - active side = 1.07\n                                 passive side = 1.05\n  Rigid boundaries:     Active side 20.00 from wall      Rough boundary\n                       Passive side 20.00 from wall      Rough boundary\n  Lower rigid boundary at elevation 4.00                 Rough boundary\nNode    Y      Nett       Wall      Wall      Shear   Bending   Strut\n no.  coord  pressure     disp.   rotation    force   moment    forces\n                 t/m2       m       rad.        t/m     t.m/m     t/m\n  1   24.50      0.00     0.019  -2.55E-04      0.0       0.0\n  2   24.00      1.96     0.019  -2.55E-04      0.5       0.0\n                 2.57     0.019  -2.55E-04      0.5       0.0\n  3   23.00      4.91     0.020  -2.73E-04      4.2       2.0\n  4   22.00      3.91     0.020  -3.67E-04      8.6       8.8\n  5   21.00      3.24     0.020  -6.15E-04     12.2      19.6     26.0\n                 3.24     0.020  -6.15E-04    -13.8      19.6\n  6   20.50      2.24     0.021  -7.58E-04    -12.4      13.1\n  7   19.75      1.38     0.021  -8.73E-04    -11.0       4.5\n  8   19.00      0.26     0.022  -8.83E-04    -10.4      -3.0\n  9   18.00      0.61     0.023  -7.41E-04    -10.0     -13.3\n 10   17.00      2.87     0.023  -4.25E-04     -8.2     -22.9\n 11   16.00      4.03     0.024   3.34E-05     -4.8     -29.6\n 12   15.00      5.31     0.023   5.74E-04     -0.1     -32.3\n 13   14.00      5.86     0.022   1.11E-03      5.5     -29.6\n 14   13.00      1.00     0.021   1.56E-03      8.9     -21.7\n 15   12.00     -3.04     0.019   1.85E-03      7.9     -12.3\n 16   11.00     -2.51     0.017   2.01E-03      5.1      -6.0\n 17   10.00     -2.12     0.015   2.08E-03      2.8      -2.1\n 18    9.00     -1.26     0.013   2.11E-03      1.1      -0.4\n 19    8.00     -0.48     0.011   2.11E-03      0.2       0.0\n 20    7.00      0.04     0.009   2.11E-03     -0.0       0.0\n 21    6.75      0.06     0.009          0      0.0       0.0\n 22    4.00     -0.07     0.000          0      0.0       0.0\n At elev. 21.00 Strut force =     26.0 t/strut =     26.0 t/m run (horiz.)\n                                               =     26.9 t/m run (inclined)\n\f\nRun ID. Example A-A                                   | Sheet No.\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                              (continued)\nStage No.4   Excavate to elevation 14.00 on PASSIVE side\nNode    Y    ------------------------ ACTIVE side ---------------------------\n no.  coord          ------- Effective stresses -------    Total     Soil\n             Water   Vertic  Active   Passive    Earth     earth   stiffness\n             press.    -al   limit     limit   pressure   pressure   coeff.\n               t/m2    t/m2    t/m2      t/m2     t/m2       t/m2      t/m3\n  1   24.50    0.00    0.00    0.00      0.00     0.00       0.00      2142\n  2   24.00    0.00    0.86    0.35      1.96     1.96       1.96p     2142\n               0.00    0.86    0.26      2.57     2.57       2.57p     3106\n  3   23.00    0.00    3.03    0.93      9.10     4.91       4.91      3106\n  4   22.00    0.00    5.00    1.54     15.01     3.91       3.91      3106\n  5   21.00    0.00    6.81    2.10     20.44     3.24       3.24      3106\n  6   20.50    0.00    7.69    2.37     23.07     2.24       2.24A     3106\n  7   19.75    0.00    8.99    2.77     26.98     1.38       1.38A     3106\n  8   19.00    0.00   10.29    3.17     30.87     0.26       0.26A     3106\n  9   18.00    0.00   12.02    3.70     36.07     0.61       0.61A     3106\n 10   17.00    0.00   13.77    4.23     41.30     2.87       2.87A     3106\n 11   16.00    0.00   15.51    4.77     46.54     4.03       4.03A     3106\n 12   15.00    0.00   17.27    5.31     51.82     5.31       5.31a     3106\n 13   14.00    0.00   19.04    5.86     57.11     5.86       5.86a     3106\n 14   13.00    0.00   20.81    6.40     62.42     6.40       6.40a     3106\n 15   12.00    0.00   22.58    6.95     67.74     6.95       6.95a     3106\n 16   11.00    0.00   24.36    7.49     73.08     7.49       7.49a     3106\n 17   10.00    0.00   26.14    8.04     78.43     8.04       8.04a     3106\n 18    9.00    0.00   27.93    8.59     83.78     9.23       9.23      3106\n 19    8.00    0.00   29.71    9.14     89.14    10.52      10.52      3106\n 20    7.00    0.00   31.50    9.69     94.51    11.70      11.70      3106\n 21    6.75    0.00   31.95    9.83     95.85    11.94      11.94      3106\n 22    4.00    1.00   35.88   11.04    107.63    14.02      15.02      3106\nNode    Y    ----------------------- PASSIVE side ---------------------------\n no.  coord          ------- Effective stresses -------    Total     Soil\n             Water   Vertic  Active   Passive    Earth     earth   stiffness\n             press.    -al   limit     limit   pressure   pressure   coeff.\n               t/m2    t/m2    t/m2      t/m2     t/m2       t/m2      t/m3\n  1   24.50    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  2   24.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  3   23.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  4   22.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  5   21.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  6   20.50    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  7   19.75    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  8   19.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n  9   18.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n 10   17.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n 11   16.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n 12   15.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n 13   14.00    0.00    0.00    0.00      0.00     0.00       0.00       0.0\n               0.00    0.00    0.00      0.00     0.00       0.00      3034\n 14   13.00    0.00    1.80    0.55      5.40     5.40       5.40p     3034\n 15   12.00    0.00    3.61    1.11     10.82     9.99       9.99      3034\n 16   11.00    0.00    5.43    1.67     16.28    10.00      10.00      3034\n 17   10.00    0.00    7.26    2.23     21.78    10.16      10.16      3034\n 18    9.00    0.00    9.12    2.80     27.35    10.49      10.49      3034\n 19    8.00    0.00   10.99    3.38     32.98    11.00      11.00      3034\n 20    7.00    0.00   12.90    3.97     38.69    11.66      11.66      3034\n 21    6.75    0.00   13.38    4.12     40.13    11.88      11.88      3034\n 22    4.00    1.00   17.76    5.46     53.29    14.08      15.08      3034\nNote:      8.04a  Soil pressure at active limit\n           5.40p  Soil pressure at passive limit\n\f\n4.03A  Arching - soil pressure below active limit\n\f\nExample Engineering Ltd.                   | Sheet No.\nProgram: WALLAP  Version 6.05  Revision A45.B58.R49         | Job No. 0000-00\n                             Licensed from GEOSOLVE         | Made by :   XX\nData filename/Run ID: Example A-A                     |\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                       Units: t,m\nINPUT DATA\n\f\nExample Engineering Ltd.                   | Sheet No.\nProgram: WALLAP  Version 6.05  Revision A45.B58.R49         | Job No. 0000-00\n                             Licensed from GEOSOLVE         | Made by :   XX\nData filename/Run ID: Example A-A                     |\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                       Units: t,m\nSummary of results\nSTABILITY ANALYSIS of Fully Embedded Wall according to Strength Factor method\n Factor of safety on soil strength\n                                FoS for toe       Toe elev. for\n                               elev. =    7.00     FoS = 1.500\n                               ---------------    -------------\n Stage  --- G.L. ---   Strut   Factor  Moment      Toe    Wall\n  No.   Act.   Pass.    Elev.    of    equilib.   elev.  Penetr\n                               Safety  at elev.          -ation\n   1   24.50   24.50    Cant.  Conditions not suitable for FoS calc.\n   2   24.50   20.50    Cant.   2.690     8.66    13.68    6.82\n   3   24.50   20.50    21.00  Conditions not suitable for FoS calc.\n   4   24.50   14.00    21.00   1.609     n/a      7.67    6.33\n\f\nExample Engineering Ltd.                   | Sheet No.\nProgram: WALLAP  Version 6.05  Revision A45.B58.R49         | Job No. 0000-00\n                             Licensed from GEOSOLVE         | Made by :   XX\nData filename/Run ID: Example A-A                     |\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                       Units: t,m\nSummary of results\nBENDING MOMENT and DISPLACEMENT ANALYSIS of Fully Embedded Wall\n  Analysis options\n  Length of wall perpendicular to section = 20.00m\n  2-D finite element model.    Soil arching modelled.\n  Soil deformations are elastic until the active or passive limit is reached\n  Open Tension Crack analysis - No\n  All soil moduli were factored to take account of\n  3-D effects due to the finite length of wall:\n                Modulus factors - active side = 1.07\n                                 passive side = 1.05\n  Rigid boundaries:     Active side 20.00 from wall      Rough boundary\n                       Passive side 20.00 from wall      Rough boundary\n  Lower rigid boundary at elevation 4.00                 Rough boundary\nBending moment, shear force and displacement envelopes\nNode    Y       Displacement         Bending moment       Shear force\n no.  coord   maximum   minimum    maximum   minimum    maximum   minimum\n                  m         m        t.m/m     t.m/m       t/m       t/m\n  1   24.50     0.027     0.000        0.0      -0.0        0.0       0.0\n  2   24.00     0.026     0.000        0.0       0.0        0.5      -0.0\n  3   23.00     0.023     0.000        2.0      -0.1        4.2      -0.1\n  4   22.00     0.021     0.000        8.8      -0.2        8.6      -0.1\n  5   21.00     0.020     0.000       19.6      -0.3       12.2     -13.8\n  6   20.50     0.021     0.000       14.2      -0.3        4.9     -12.4\n  7   19.75     0.021     0.000       12.3      -0.3        5.3     -11.0\n  8   19.00     0.022     0.000       14.6      -3.0        3.5     -10.4\n  9   18.00     0.023     0.000       16.2     -13.3        0.4     -10.0\n 10   17.00     0.023     0.000       15.4     -22.9        0.1      -8.2\n 11   16.00     0.024     0.000       13.3     -29.6        0.1      -4.8\n 12   15.00     0.023     0.000       10.7     -32.3        0.0      -2.6\n 13   14.00     0.022     0.000        8.1     -29.6        5.5      -2.4\n 14   13.00     0.021     0.000        5.8     -21.7        8.9      -2.1\n 15   12.00     0.019     0.000        3.9     -12.3        7.9      -1.7\n 16   11.00     0.017     0.000        2.3      -6.0        5.1      -1.3\n 17   10.00     0.015     0.000        1.2      -2.1        2.8      -0.9\n 18    9.00     0.013     0.000        0.5      -0.4        1.1      -0.5\n 19    8.00     0.011     0.000        0.1      -0.2        0.2      -0.2\n 20    7.00     0.009     0.000        0.0      -0.0        0.0      -0.0\n 21    6.75     0.009     0.000        0.0       0.0        0.0       0.0\n 22    4.00     0.000     0.000        0.0       0.0        0.0      -0.0\nMaximum and minimum bending moment and shear force at each stage\nStage  --------- Bending moment --------   ---------- Shear force ----------\n no.   maximum   elev.   minimum   elev.   maximum   elev.   minimum   elev.\n         t.m/m             t.m/m               t/m               t/m\n  1        0.0   11.00      -0.3   20.50       0.1   18.00      -0.1   23.00\n  2       16.2   18.00       0.0   24.50       5.3   19.75      -2.6   15.00\n  3       16.7   21.00      -0.4    9.00      11.2   21.00      -6.1   21.00\n  4       19.6   21.00     -32.3   15.00      12.2   21.00     -13.8   21.00\n\f\nRun ID. Example A-A                                   | Sheet No.\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\nSummary of results   (continued)\nMaximum and minimum displacement at each stage\nStage -------- Displacement ---------   Stage description\n no.  maximum  elev.   minimum  elev.   -----------------\n          m                m\n  1    0.000   22.00    0.000   24.50   Apply surcharge no.1 at elev. 24.50\n  2    0.027   24.50    0.000   24.50   Excav. to elev. 20.50 on PASSIVE side\n  3    0.019   24.50    0.000   24.50   Install strut no.1 at elev. 21.00\n  4    0.024   16.00    0.000   24.50   Excav. to elev. 14.00 on PASSIVE side\nStrut forces at each stage  (horizontal components)\nStage   --- Strut no. 1 ---\n no.       at elev. 21.00\n          t/m run   t/strut\n  3       17.39     17.39\n  4       25.97     25.97\n\f\nExample Engineering Ltd.                   | Sheet No.\nProgram: WALLAP  Version 6.05  Revision A45.B58.R49         | Job No. 0000-00\n                             Licensed from GEOSOLVE         | Made by :   XX\nData filename/Run ID: Example A-A                     |\nSection A-A (example)                                                 | Checked :\n-----------------------------------------------------------------------------\n                                                       Units: t,m\nINPUT DATA";
+const PDFJS_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.7.284/legacy/build/';
+
+// ---------- state
+const S = { R: null, reports: [], cur: -1, isExample: false, fileName: '', tab: 'overview', secStage: null, forceStage: 'env', loadStage: null, unit: 'report' };
+try { const u = localStorage.getItem('wr-unit'); if (u) S.unit = u; } catch (e) {}
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---------- units
+const G = 9.81;
+function U() {
+  const base = (S.R?.meta.forceUnit || 't').toLowerCase();
+  const toKN = base === 't' && S.unit === 'kN';
+  const f = toKN ? G : 1;
+  const F = base === 't' && !toKN ? 't' : 'kN';
+  return {
+    f, F, Fm: F + '/m', M: F + '·m/m', P: F === 't' ? 't/m²' : 'kPa', Gm: F === 't' ? 't/m³' : 'kN/m³',
+    canToggle: base === 't'
+  };
+}
+const fx = (v, d = 1) => v == null || isNaN(v) ? '–' : (Math.abs(v) < 1e-9 ? 0 : v).toFixed(d);
+const fF = (v, d = 1) => v == null ? '–' : fx(v * U().f, d);
+const el = v => v == null ? '–' : (v >= 0 ? '+' : '') + v.toFixed(2);
+const mm = v => v == null ? '–' : (v * 1000).toFixed(0);
+
+function renderUnitSeg() {
+  const u = U(); const seg = $('#unitSeg');
+  if (!S.R || !u.canToggle) { seg.hidden = true; return; }
+  seg.hidden = false;
+  seg.innerHTML = `<button type="button" data-u="report" aria-pressed="${S.unit !== 'kN'}">t, m</button><button type="button" data-u="kN" aria-pressed="${S.unit === 'kN'}">kN, m</button>`;
+  seg.querySelectorAll('button').forEach(b => b.onclick = () => { S.unit = b.dataset.u; try { localStorage.setItem('wr-unit', S.unit); } catch (e) {} render(); });
+}
+
+// ---------- loading (several reports can be open; switch between them)
+function showMsg(html, kind = '') { const m = $('#msg'); if (!html) { m.hidden = true; return; } m.className = 'msg ' + kind; m.innerHTML = html; m.hidden = false; }
+function selectReport(i, keepTab) {
+  const rep = S.reports[i]; if (!rep) return;
+  S.cur = i; S.R = rep.R; S.isExample = rep.isExample; S.fileName = rep.name;
+  if (!keepTab) S.tab = 'overview';
+  const detail = Object.keys(rep.R.results).map(Number);
+  S.secStage = rep.R.stages.length ? rep.R.stages[rep.R.stages.length - 1].no : null;
+  S.loadStage = detail.length ? detail[detail.length - 1] : null;
+  S.forceStage = 'env';
+  render();
+}
+// returns an error string, or '' when the report was opened
+function loadText(text, name, isExample, quiet) {
+  const R = parseWallap(text);
+  if (!R.stages.length && !R.summary.envelope.length) return `<b>${esc(name)}</b>: no WALLAP results found. Open the PDF report that WALLAP prints (it starts with "INPUT DATA" and ends with "Summary of results").`;
+  if (isExample) {
+    const j = S.reports.findIndex(r => r.isExample);
+    if (j >= 0) { selectReport(j); return ''; }
+    S.reports.push({ name, R, isExample: true });
+  } else {
+    S.reports = S.reports.filter(r => !r.isExample);
+    const j = S.reports.findIndex(r => r.name === name);
+    if (j >= 0) S.reports[j] = { name, R, isExample: false }; else S.reports.push({ name, R, isExample: false });
+  }
+  if (!quiet) selectReport(S.reports.findIndex(r => r.R === R));
+  return R.warnings.length ? `<b>${esc(name)}</b>: ${R.warnings.map(esc).join(' ')}` : '';
+}
+let pdfjsPromise = null;
+async function getPdfjs() {
+  if (!pdfjsPromise) pdfjsPromise = (async () => {
+    const lib = await import(PDFJS_BASE + 'pdf.min.mjs');
+    const worker = await import(PDFJS_BASE + 'pdf.worker.min.mjs');
+    globalThis.pdfjsWorker = worker;
+    lib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.mjs';
+    return lib;
+  })().catch(e => { pdfjsPromise = null; throw new Error('the PDF reader could not be loaded. Check the internet connection and try again'); });
+  return pdfjsPromise;
+}
+async function readFile(file) {
+  const name = file.name || 'file';
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const head = String.fromCharCode(...buf.slice(0, 5));
+  try {
+    if (head === '%PDF-') { const lib = await getPdfjs(); return loadText(await pdfToText(lib, buf), name, false, true); }
+    if (/\.dat$/i.test(name) || buf.slice(0, 64).some(b => b === 0)) return `<b>${esc(name)}</b> is a WALLAP input data file (.dat). It holds the model, not the results. Print the results report from WALLAP to PDF and open that PDF here.`;
+    return loadText(new TextDecoder().decode(buf), name, false, true);
+  } catch (e) {
+    console.error(e);
+    return `<b>Couldn't read ${esc(name)}</b>: ${esc(e.message || e)}. Check that the PDF opens normally and was printed from WALLAP (not scanned).`;
+  }
+}
+async function loadFiles(list) {
+  const files = [...(list || [])].filter(Boolean); if (!files.length) return;
+  const before = S.reports.filter(r => !r.isExample).length;
+  const errs = [];
+  for (let i = 0; i < files.length; i++) {
+    showMsg(`Reading <b>${esc(files[i].name)}</b>${files.length > 1 ? ` (${i + 1} of ${files.length})` : ''}…`);
+    const e = await readFile(files[i]); if (e) errs.push(e);
+  }
+  showMsg(errs.length ? errs.join('<br>') : '', errs.length ? 'err' : '');
+  const opened = S.reports.filter(r => !r.isExample);
+  if (opened.length > before || opened.length) {
+    const lastName = [...files].reverse().map(f => f.name).find(n => opened.some(r => r.name === n));
+    const j = S.reports.findIndex(r => r.name === lastName);
+    if (j >= 0) { selectReport(j); return; }
+  }
+  render();
+}
+function closeReport(i) {
+  S.reports.splice(i, 1);
+  if (!S.reports.length) { loadText(SAMPLE_TEXT, 'Example report', true); return; }
+  selectReport(Math.min(i, S.reports.length - 1), true);
+}
+$('#file').addEventListener('change', e => { loadFiles(e.target.files); e.target.value = ''; });
+$('#loadExample').onclick = () => { showMsg(''); loadText(SAMPLE_TEXT, 'Example report', true); };
+let dragDepth = 0;
+addEventListener('dragenter', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { dragDepth++; $('#drop').hidden = false; } });
+addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) $('#drop').hidden = true; });
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => { e.preventDefault(); dragDepth = 0; $('#drop').hidden = true; loadFiles(e.dataTransfer.files); });
+// upload area and open-report chips, shown above the report
+function uploadBlock() {
+  const mine = S.reports.filter(r => !r.isExample);
+  const big = !mine.length;
+  const chips = S.reports.length > 1 || mine.length ? `<div class="chips" role="tablist" aria-label="Open reports">${S.reports.map((r, i) => `<span class="rchip${i === S.cur ? ' on' : ''}"><button type="button" data-rep="${i}" role="tab" aria-selected="${i === S.cur}" title="${esc(r.name)}">${esc(r.R.meta.title || r.R.meta.runId || r.name)}${S.reports.filter(q => (q.R.meta.title || q.name) === (r.R.meta.title || r.name)).length > 1 ? ` <em>${esc(r.name)}</em>` : ''}${r.isExample ? ' <em>example</em>' : ''}</button><button type="button" class="x" data-close="${i}" aria-label="Close ${esc(r.R.meta.title || r.name)}">×</button></span>`).join('')}</div>` : '';
+  return `<div class="upload${big ? ' big' : ''}">
+    <label class="dropzone" for="file-drop">
+      <input id="file-drop" type="file" multiple accept=".pdf,.txt,.out,.lst,.dat,application/pdf,text/plain">
+      <svg width="${big ? 34 : 20}" height="${big ? 34 : 20}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span class="dz-text">${big ? `<b>Upload a WALLAP report</b><span>Drag PDF files here or click to choose. You can open several sections at once.</span>` : `<b>Upload another WALLAP PDF</b><span>Drag files here or click. Each report opens as its own tab below.</span>`}</span>
+      <span class="btn primary dz-btn">Choose PDF files</span>
+    </label>
+    ${big ? `<p class="hint dz-note">Below is an example report so you can see what you get. Your files are read in your browser and never uploaded.</p>` : ''}
+    ${chips}
+  </div>`;
+}
+function wireUpload(root) {
+  const inp = root.querySelector('#file-drop'); if (inp) inp.addEventListener('change', e => { loadFiles(e.target.files); e.target.value = ''; });
+  root.querySelectorAll('[data-rep]').forEach(b => b.onclick = () => { showMsg(''); selectReport(+b.dataset.rep, true); });
+  root.querySelectorAll('[data-close]').forEach(b => b.onclick = () => closeReport(+b.dataset.close));
+}
+
+// ---------- derived helpers
+function strutForceRows(R) {
+  // per stage, per strut: horizontal per m run and per strut, plus axial along the anchor
+  const rows = [];
+  for (const r of R.summary.strutForces) for (const no in r.forces) {
+    const s = R.struts.find(x => x.no === +no) || {}; const f = r.forces[no];
+    const c = Math.cos((s.incl || 0) * Math.PI / 180);
+    const perStrut = f.perStrut ?? (f.perM * (s.spacing || 1));
+    rows.push({ stage: r.stage, no: +no, perM: f.perM, perStrut, axial: perStrut / c, axialM: f.perM / c, s });
+  }
+  // fall back to stage detail output if no summary table
+  if (!rows.length) for (const k in R.results) for (const f of R.results[k].strutForces) {
+    const s = R.struts.find(x => Math.abs(x.elev - f.elev) < 0.01) || {}; const c = Math.cos((s.incl || 0) * Math.PI / 180);
+    rows.push({ stage: +k, no: s.no, perM: f.perM, perStrut: f.perStrut, axial: f.perStrut / c, axialM: f.perM / c, s });
+  }
+  return rows;
+}
+function envelope(R) {
+  if (R.summary.envelope.length) return R.summary.envelope;
+  // build from detailed stages if summary missing
+  const map = new Map();
+  for (const k in R.results) for (const n of R.results[k].nodes) {
+    const e = map.get(n.y) || { y: n.y, node: n.node, dMax: -1e9, dMin: 1e9, MMax: -1e9, MMin: 1e9, VMax: -1e9, VMin: 1e9 };
+    e.dMax = Math.max(e.dMax, n.disp); e.dMin = Math.min(e.dMin, n.disp); e.MMax = Math.max(e.MMax, n.M); e.MMin = Math.min(e.MMin, n.M); e.VMax = Math.max(e.VMax, n.V); e.VMin = Math.min(e.VMin, n.V);
+    map.set(n.y, e);
+  }
+  return [...map.values()].sort((a, b) => b.y - a.y);
+}
+function keyNumbers(R) {
+  const env = envelope(R);
+  const argmax = (arr, f) => arr.reduce((b, x) => (f(x) > f(b) ? x : b), arr[0]);
+  const o = {};
+  if (env.length) {
+    const a = argmax(env, e => e.MMax), b = argmax(env, e => -e.MMin), c = argmax(env, e => Math.max(Math.abs(e.VMax), Math.abs(e.VMin)));
+    o.Mpos = { v: a.MMax, y: a.y }; o.Mneg = { v: b.MMin, y: b.y };
+    o.V = { v: Math.abs(c.VMax) >= Math.abs(c.VMin) ? c.VMax : c.VMin, y: c.y };
+    const sm = R.summary.stageMax;
+    o.Mpos.stage = sm.find(s => Math.abs(s.MMax - o.Mpos.v) < 0.05 && Math.abs(s.MMaxElev - o.Mpos.y) < 0.01)?.stage;
+    o.Mneg.stage = sm.find(s => Math.abs(s.MMin - o.Mneg.v) < 0.05 && Math.abs(s.MMinElev - o.Mneg.y) < 0.01)?.stage;
+    o.V.stage = sm.find(s => (Math.abs(s.VMax - o.V.v) < 0.05 && Math.abs(s.VMaxElev - o.V.y) < 0.01) || (Math.abs(s.VMin - o.V.v) < 0.05 && Math.abs(s.VMinElev - o.V.y) < 0.01))?.stage;
+  }
+  if (R.summary.stageDisp.length) { const d = argmax(R.summary.stageDisp, s => Math.max(Math.abs(s.dMax), Math.abs(s.dMin))); o.D = { v: Math.abs(d.dMax) >= Math.abs(d.dMin) ? d.dMax : d.dMin, y: Math.abs(d.dMax) >= Math.abs(d.dMin) ? d.dMaxElev : d.dMinElev, stage: d.stage }; }
+  else if (env.length) { const d = argmax(env, e => Math.max(Math.abs(e.dMax), Math.abs(e.dMin))); o.D = { v: d.dMax, y: d.y }; }
+  const sf = strutForceRows(R);
+  if (sf.length) { o.A = argmax(sf, r => r.axial); }
+  const st = R.summary.stability.length ? R.summary.stability : Object.values(R.results).map(r => r.stability).filter(Boolean);
+  const withF = st.filter(s => s.fos != null);
+  if (withF.length) o.F = withF.reduce((b, x) => (x.fos < b.fos ? x : b));
+  return o;
+}
+
+// ---------- render shell
+function render() {
+  renderUnitSeg();
+  const R = S.R, app = $('#app');
+  if (!R) { app.innerHTML = ''; return; }
+  const u = U(), K = keyNumbers(R), m = R.meta;
+  const detailStages = Object.keys(R.results).map(Number);
+  const target = R.options.fosTarget;
+  const fosChip = K.F ? (target && K.F.fos < target ? `<span class="chip crit">▼ below ${target.toFixed(2)}</span>` : `<span class="chip good">✓ ≥ ${target ? target.toFixed(2) : ''}</span>`) : '';
+  app.innerHTML = `
+  ${uploadBlock()}
+  <section class="sheet" aria-label="Report summary" style="gap:12px">
+    <div class="titleblock">
+      <div><div class="tb-label">Section</div><div class="tb-val big">${esc(m.title || m.runId || S.fileName)}</div>
+        <div class="tb-sub">${esc(m.company || '')} ${S.isExample ? '<span class="chip example">Example report</span>' : `<span class="chip">${esc(S.fileName)}</span>`}</div></div>
+      <div><div class="tb-label">Job no.</div><div class="tb-val">${esc(m.job || '–')}</div><div class="tb-sub">Made by ${esc(m.madeBy || '–')}</div></div>
+      <div><div class="tb-label">Run ID</div><div class="tb-val">${esc(m.runId || '–')}</div></div>
+      <div><div class="tb-label">Wall</div><div class="tb-val">${esc(R.wall.type || '–')}</div><div class="tb-sub mono">EI ${R.wall.EI ? Math.round(R.wall.EI * u.f).toLocaleString('en-US') : '–'} ${u.F}·m²/m</div></div>
+      <div><div class="tb-label">Program</div><div class="tb-val">${esc((m.program || 'WALLAP').replace(/Revision.*/, ''))}</div><div class="tb-sub">${R.stages.length} stages · units in report: ${esc(m.units || '')}</div></div>
+    </div>
+    <div class="kpis">
+      ${K.Mpos ? kpi('Max moment (+)', fF(K.Mpos.v), u.M, `at ${el(K.Mpos.y)}${K.Mpos.stage ? ' · stage ' + K.Mpos.stage : ''}`) : ''}
+      ${K.Mneg ? kpi('Max moment (−)', fF(K.Mneg.v), u.M, `at ${el(K.Mneg.y)}${K.Mneg.stage ? ' · stage ' + K.Mneg.stage : ''}`) : ''}
+      ${K.V ? kpi('Max shear', fF(Math.abs(K.V.v)), u.Fm, `at ${el(K.V.y)}${K.V.stage ? ' · stage ' + K.V.stage : ''}`) : ''}
+      ${K.D ? kpi('Max displacement', mm(K.D.v), 'mm', `at ${el(K.D.y)}${K.D.stage ? ' · stage ' + K.D.stage : ''}`) : ''}
+      ${K.A ? kpi('Anchor force (axial)', fF(K.A.axial), u.F + '/anchor', `A${K.A.no} at ${el(K.A.s.elev)} · stage ${K.A.stage}`) : ''}
+      ${K.F ? kpi('Min factor of safety', K.F.fos.toFixed(2), '', `stage ${K.F.stage} ${fosChip}`) : ''}
+    </div>
+  </section>
+  <nav class="tabs" role="tablist" aria-label="Views">
+    ${[['overview', 'Summary'], ['section', 'Wall section'], ['loads', 'Loads'], ['forces', 'Moments & shear'], ['anchors', 'Anchors'], ['design', 'Anchor design'], ['stages', 'Stages'], ['export', 'Export 1:100']].map(([k, t]) => `<button type="button" role="tab" id="tab-${k}" aria-selected="${S.tab === k}" data-tab="${k}">${t}</button>`).join('')}
+  </nav>
+  <section class="sheet" id="sheet" role="tabpanel"></section>
+  <p class="foot">Runs in your browser: reports you open are read on your computer and not uploaded. Values are read straight from the WALLAP report; nothing is re-analysed. ${u.f !== 1 ? 'Forces converted from tonnes with g = 9.81 m/s². ' : ''}Sign convention as in WALLAP. Elevations in m.</p>`;
+  app.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; render(); });
+  wireUpload(app);
+  const sheet = $('#sheet');
+  ({ overview: renderOverview, section: renderSection, loads: renderLoads, forces: renderForces, anchors: renderAnchors, design: renderDesign, stages: renderStages, export: renderExport }[S.tab] || renderOverview)(sheet);
+}
+function kpi(label, val, unit, sub) { return `<div class="kpi"><div class="k-label">${label}</div><div class="k-val">${val}<span>${unit}</span></div><div class="k-sub">${sub}</div></div>`; }
+
+function stepper(stages, current, attr, enabled) {
+  return `<div class="stepper" role="group" aria-label="Construction stage">${stages.map(s => `<button type="button" ${attr}="${s.no}" aria-pressed="${s.no === current}" ${enabled && !enabled(s.no) ? 'disabled title="No detailed output for this stage in the report"' : ''}><b>Stage ${s.no}</b><span>${esc(s.desc)}</span></button>`).join('')}</div>`;
+}
+
+// ---------- SECTION DRAWING
+function soilClass(no) { return 'soil-' + (((no - 1) % 4) + 1); }
+const secData = {}; let secSeq = 0;
+function sectionName(R) { return R.meta.title || R.meta.runId || S.fileName || 'Section'; }
+// opts: forces {no: row}, ghosts, title, subtitle, compact, diagram {curves:[{name,color,pts:[{y,v}]}], dir, fmt, unit}
+function sectionSVG(R, stageNo, opts = {}) {
+  const st = R.derived.stageState.find(s => s.stage === stageNo) || R.derived.stageState[R.derived.stageState.length - 1] || { glActive: R.derived.groundTop, glPassive: R.derived.groundTop, struts: [], surcharges: [], waterActive: R.water.active, waterPassive: R.water.passive };
+  const u = U();
+  const compact = !!opts.compact, diag = opts.diagram || null;
+  const top = R.derived.wallTop, toe = R.wall.toe ?? (top - 10);
+  const lowB = R.options.lowerBoundary;
+  let yTop = Math.max(top, st.glActive) + 1.6;
+  let yBot = toe - 1.5;
+  if (lowB != null && lowB > toe - 6) yBot = Math.min(yBot, lowB - 0.8);
+  for (const w of [st.waterActive, st.waterPassive]) if (w != null && w < yBot + 0.5 && w > toe - 6) yBot = w - 0.8;
+  const reach = Math.max(0, ...R.struts.map(s => (s.freeLength || 0) * Math.cos((s.incl || 0) * Math.PI / 180)));
+  const surReach = Math.max(0, ...R.surcharges.filter(s => s.side === 'active').map(s => s.dist + (s.width || 4)));
+  const H = yTop - yBot;
+  const xL = -Math.max(0.55 * H, reach + 1.5, surReach + 1.5);
+  const xR = Math.max(0.42 * H, 6);
+  const W = compact ? 400 : 960, ml = compact ? 8 : 18, mr = compact ? 58 : 170;
+  const mt = opts.title ? (compact ? 52 : 70) : (compact ? 20 : 26), mb = compact ? 28 : 34;
+  const s = (W - ml - mr) / (xR - xL);
+  const Hpx = H * s + mt + mb;
+  const X = x => ml + (x - xL) * s, Y = y => mt + (yTop - y) * s;
+  const out = [];
+  const strata = [...R.strata].sort((a, b) => b.top - a.top);
+  out.push(`<g class="soilg${diag ? ' faded' : ''}">`);
+  const band = (side, gl, x0, x1) => {
+    for (let i = 0; i < strata.length; i++) {
+      const t = Math.min(strata[i].top, gl), b = Math.max(i + 1 < strata.length ? strata[i + 1].top : yBot, yBot);
+      if (t <= b) continue;
+      const no = side === 'a' ? strata[i].activeSoil : strata[i].passiveSoil;
+      out.push(`<rect class="${soilClass(no)}" x="${X(x0)}" y="${Y(t)}" width="${X(x1) - X(x0)}" height="${Y(b) - Y(t)}"/>`);
+      if (i > 0 && strata[i].top < gl) out.push(`<line class="stratum" x1="${X(x0)}" x2="${X(x1)}" y1="${Y(strata[i].top)}" y2="${Y(strata[i].top)}"/>`);
+      const name = side === 'a' ? strata[i].activeName : strata[i].passiveName;
+      if (!compact && Y(b) - Y(t) > 24) {
+        const tx = side === 'a' ? X(x0) + 8 : X(x1) - 8;
+        const ty = Math.min(Y(t) + 15, (Y(t) + Y(b)) / 2 + 4);
+        out.push(`<text class="soil-label" x="${tx}" y="${ty}" text-anchor="${side === 'a' ? 'start' : 'end'}">${esc(name)}</text>`);
+      }
+    }
+  };
+  band('a', st.glActive, xL, 0); band('p', st.glPassive, 0, xR);
+  out.push('</g>');
+  const ground = (x0, x1, y) => { out.push(`<line class="ground" x1="${X(x0)}" x2="${X(x1)}" y1="${Y(y)}" y2="${Y(y)}"/>`); for (let x = X(x0) + 4; x < X(x1) - 2; x += compact ? 7 : 9) out.push(`<line class="hatch" x1="${x}" y1="${Y(y)}" x2="${x - 4}" y2="${Y(y) + 4}"/>`); };
+  ground(xL, 0, st.glActive); ground(0, xR, st.glPassive);
+  if (lowB != null && lowB > yBot) { out.push(`<line class="boundary" x1="${X(xL)}" x2="${X(xR)}" y1="${Y(lowB)}" y2="${Y(lowB)}"/>`); }
+  const wt = (x0, x1, y) => { if (y == null || y < yBot || y > yTop) return; out.push(`<line class="water" x1="${X(x0)}" x2="${X(x1)}" y1="${Y(y)}" y2="${Y(y)}"/>`); const cx = (X(x0) + X(x1)) / 2; out.push(`<path class="water-sym" d="M${cx - 5} ${Y(y) - 8} h10 l-5 7z"/>`); };
+  wt(xL, 0, st.waterActive); wt(0, xR, st.waterPassive);
+  for (const sc of R.surcharges) {
+    const on = st.surcharges.includes(sc.no); if (!on && !opts.ghosts) continue;
+    const sign = sc.side === 'active' ? -1 : 1;
+    const xa = sign * sc.dist, xb = sign * (sc.dist + (sc.width || 4));
+    const y0 = Y(sc.elev), x0 = Math.min(X(xa), X(xb)), x1 = Math.max(X(xa), X(xb));
+    const hh = compact ? 12 : 22;
+    const n = Math.max(3, Math.round((x1 - x0) / (compact ? 10 : 14)));
+    let g = `<g class="${on ? 'sur' : 'sur ghost'}">`;
+    g += `<line x1="${x0}" x2="${x1}" y1="${y0 - hh}" y2="${y0 - hh}"/>`;
+    for (let i = 0; i <= n; i++) { const x = x0 + (x1 - x0) * i / n; g += `<line x1="${x}" x2="${x}" y1="${y0 - hh}" y2="${y0 - 3}"/><path d="M${x - 2.5} ${y0 - 7} L${x} ${y0 - 2} L${x + 2.5} ${y0 - 7}z"/>`; }
+    if (!compact) g += `<text x="${(x0 + x1) / 2}" y="${y0 - 27}" text-anchor="middle">q = ${fF(sc.qNear, 2)} ${u.P}${sc.qFar != null && sc.qFar !== sc.qNear ? ' → ' + fF(sc.qFar, 2) : ''}</text>`;
+    out.push(g + '</g>');
+  }
+  let dK = 0, DX = null, dMax = 0;
+  if (diag) {
+    for (const c of diag.curves) c.pts = c.pts.filter(p => p.y >= toe - 1e-6 && p.y <= top + 1e-6);
+    dMax = Math.max(1e-9, ...diag.curves.flatMap(c => c.pts.map(p => Math.abs(p.v))));
+    dK = Math.min(-xL, xR) * 0.7 / dMax;
+    DX = v => X(diag.dir * v * dK);
+    for (const c of diag.curves) {
+      if (!c.pts.length || c.pts.every(p => Math.abs(p.v) < dMax * 0.01)) continue;
+      const d = c.pts.map(p => `L${DX(p.v).toFixed(1)} ${Y(p.y).toFixed(1)}`).join('');
+      out.push(`<path d="M${X(0)} ${Y(c.pts[0].y)}${d}L${X(0)} ${Y(c.pts[c.pts.length - 1].y)}Z" style="fill:${c.color};fill-opacity:.22;stroke:none"/>`);
+      out.push(`<path d="M${d.slice(1)}" style="fill:none;stroke:${c.color};stroke-width:2;stroke-linejoin:round"/>`);
+    }
+  }
+  out.push(`<line class="wall" x1="${X(0)}" x2="${X(0)}" y1="${Y(top)}" y2="${Y(toe)}"/>`);
+  // anchors: free length solid, a short fixed-length stub; label along the anchor
+  const forces = opts.forces || {};
+  for (const a of R.struts) {
+    const on = st.struts.includes(a.no); if (!on && !opts.ghosts) continue;
+    const ang = (a.incl || 0) * Math.PI / 180, L = a.freeLength || 6;
+    const x1 = -L * Math.cos(ang), y1 = a.elev - L * Math.sin(ang);
+    const bx = Math.max(xL + 0.4, x1 - 0.35 * L * Math.cos(ang));
+    out.push(`<g class="${on ? 'anchor' : 'anchor ghost'}"><line x1="${X(0)}" y1="${Y(a.elev)}" x2="${X(x1)}" y2="${Y(y1)}"/><line class="bond" x1="${X(x1)}" y1="${Y(y1)}" x2="${X(bx)}" y2="${Y(a.elev + bx * Math.tan(ang))}"/><rect x="${X(0) - (compact ? 2 : 3)}" y="${Y(a.elev) - (compact ? 5 : 7)}" width="${compact ? 4 : 6}" height="${compact ? 10 : 14}"/></g>`);
+    if (compact) continue;
+    const f = forces[a.no];
+    const tx = X(x1 * 0.52), tyl = Y(a.elev - L * 0.52 * Math.sin(ang));
+    const rot = `rotate(${-(a.incl || 0)} ${tx} ${tyl})`;
+    if (!on) { out.push(`<text class="anchor-label ghost" x="${tx}" y="${tyl - 9}" text-anchor="middle" transform="${rot}">A${a.no} (not yet installed)</text>`); continue; }
+    if (f) {
+      out.push(`<text class="anchor-label" x="${tx}" y="${tyl - 9}" text-anchor="middle" transform="${rot}">A${a.no} · T = ${fF(f.axial, 1)} ${u.F}/anchor</text>`);
+      out.push(`<text class="anchor-sub" x="${tx}" y="${tyl + 17}" text-anchor="middle" transform="${rot}">H = ${fF(f.perM, 2)} ${u.Fm}${f.stage != null ? ' · stage ' + f.stage : ''}</text>`);
+    } else out.push(`<text class="anchor-label" x="${tx}" y="${tyl - 9}" text-anchor="middle" transform="${rot}">A${a.no}</text>`);
+  }
+  if (!compact && !diag) {
+    const dimX = X(Math.min(2.2, xR * 0.35));
+    const dim = (ya, yb, text) => { if (Math.abs(ya - yb) < 0.2) return; const a = Y(ya), b = Y(yb); out.push(`<g class="dim"><line x1="${dimX}" x2="${dimX}" y1="${a}" y2="${b}"/><path d="M${dimX - 4} ${a + 7} L${dimX} ${a} L${dimX + 4} ${a + 7}M${dimX - 4} ${b - 7} L${dimX} ${b} L${dimX + 4} ${b - 7}"/><line x1="${dimX - 7}" x2="${dimX + 7}" y1="${a}" y2="${a}"/><line x1="${dimX - 7}" x2="${dimX + 7}" y1="${b}" y2="${b}"/><text x="${dimX + 9}" y="${(a + b) / 2 + 4}">${text}</text></g>`); };
+    dim(top, st.glPassive, `${(top - st.glPassive).toFixed(2)} m excavation`);
+    dim(st.glPassive, toe, `${(st.glPassive - toe).toFixed(2)} m embedment`);
+  }
+  // envelope / result diagram drawn along the wall
+  let hid = null;
+  if (diag) {
+    const maxAbs = dMax;
+    // peak labels: each curve's extreme, plus local peaks that stand out (prominence >= 10% of the largest value)
+    const cand = [];
+    diag.curves.forEach(c => {
+      const p = c.pts, A = p.map(q => Math.abs(q.v)); let best = null;
+      A.forEach((a, i) => { if (!best || a > best.a) best = { ...p[i], a, color: c.color, main: true }; });
+      if (best && best.a > maxAbs * 0.01) cand.push(best);
+      A.forEach((a, i) => {
+        if (a < 0.15 * maxAbs || (best && p[i].y === best.y)) return;
+        if ((i > 0 && A[i - 1] > a) || (i < A.length - 1 && A[i + 1] > a)) return;
+        let mL = a, mR = a, j;
+        for (j = i - 1; j >= 0 && A[j] <= a; j--) mL = Math.min(mL, A[j]); if (j < 0) mL = Math.min(mL, 0);
+        for (j = i + 1; j < A.length && A[j] <= a; j++) mR = Math.min(mR, A[j]); if (j >= A.length) mR = Math.min(mR, 0);
+        if (a - Math.max(mL, mR) >= 0.1 * maxAbs) cand.push({ ...p[i], a, color: c.color });
+      });
+    });
+    cand.sort((a, b) => (!!b.main - !!a.main) || (b.a - a.a));
+    const placed = [];
+    const fs = compact ? 11 : 12.5;
+    for (const c of cand) {
+      const side = Math.sign(diag.dir * c.v) || 1, px = DX(c.v), py = Y(c.y);
+      if (placed.some(q => q.side === side && Math.abs(q.py - py) < fs * (q.main || c.main ? 2.3 : 1.35))) continue;
+      const t1 = diag.fmt(c.v), t2 = c.main ? '@ ' + el(c.y) : '';
+      const wEst = Math.max(t1.length, t2.length) * fs * 0.62;
+      let tx = px + side * 6, anchor = side > 0 ? 'start' : 'end';
+      if (side > 0 && tx + wEst > X(xR) + (compact ? mr - 44 : 4)) { tx = px - 6; anchor = 'end'; }
+      if (side < 0 && tx - wEst < X(xL)) { tx = px + 6; anchor = 'start'; }
+      placed.push({ side, py, main: c.main });
+      out.push(`<circle cx="${px}" cy="${py}" r="${c.main ? 4 : 2.8}" style="fill:${c.color};stroke:var(--surface);stroke-width:1.5"/>`);
+      out.push(`<text class="pk${c.main ? ' main' : ''}" x="${tx}" y="${py + (c.main ? -1 : 4)}" text-anchor="${anchor}">${t1}</text>`);
+      if (t2) out.push(`<text class="pk-sub" x="${tx}" y="${py + fs}" text-anchor="${anchor}">${t2}</text>`);
+    }
+    hid = 's' + (++secSeq);
+    secData[hid] = { mt, s, yTop, H: Hpx, W, ml, mr, xl: X(xL), xr: X(xR), curves: diag.curves, fmt: diag.fmt, unit: diag.unit };
+    out.push(`<g class="hov" visibility="hidden"><line x1="${X(xL)}" x2="${X(xR)}" y1="0" y2="0"/></g>`);
+  }
+  // level labels at right
+  const levels = [{ y: top, t: 'Top of wall' }];
+  if (Math.abs(st.glActive - top) > 0.01) levels.push({ y: st.glActive, t: 'Retained ground' });
+  if (st.glPassive < top - 0.01) levels.push({ y: st.glPassive, t: 'Excavation level' });
+  for (const a of R.struts) if (st.struts.includes(a.no) || opts.ghosts) levels.push({ y: a.elev, t: `Anchor A${a.no}`, c: 'anchor-t' });
+  levels.push({ y: toe, t: 'Toe of wall' });
+  if (st.waterActive != null && st.waterActive >= yBot) levels.push({ y: st.waterActive, t: 'Water table', c: 'water-t' });
+  if (st.waterPassive != null && st.waterPassive !== st.waterActive && st.waterPassive >= yBot) levels.push({ y: st.waterPassive, t: 'Water (exc. side)', c: 'water-t' });
+  if (!compact && lowB != null && lowB >= yBot) levels.push({ y: lowB, t: 'Rigid boundary' });
+  levels.sort((a, b) => b.y - a.y);
+  let lastY = -1e9; const lx = W - mr + (compact ? 8 : 14), gap = compact ? 13 : 26;
+  for (const l of levels) {
+    const py = Y(l.y); const ly = Math.max(py, lastY + gap); lastY = ly;
+    out.push(`<line class="leader" x1="${X(xR)}" x2="${lx - 4}" y1="${py}" y2="${py}"/><line class="leader" x1="${lx - 4}" x2="${lx}" y1="${py}" y2="${compact ? ly - 3 : ly - 4}"/>`);
+    if (compact) out.push(`<text class="lvl sm ${l.c || ''}" x="${lx + 2}" y="${ly + 1}">${el(l.y)}</text>`);
+    else out.push(`<text class="lvl ${l.c || ''}" x="${lx + 4}" y="${ly - 6}"><tspan class="t-mono lvl-v">${el(l.y)}</tspan></text><text class="lvl-t" x="${lx + 4}" y="${ly + 8}">${l.t}</text>`);
+  }
+  const sb = [1, 2, 5, 10].find(v => v * s > (compact ? 40 : 60)) || 10;
+  out.push(`<g class="scale"><line x1="${ml}" x2="${ml + sb * s}" y1="${Hpx - 10}" y2="${Hpx - 10}"/><line x1="${ml}" x2="${ml}" y1="${Hpx - 14}" y2="${Hpx - 6}"/><line x1="${ml + sb * s}" x2="${ml + sb * s}" y1="${Hpx - 14}" y2="${Hpx - 6}"/><text x="${ml + sb * s + 6}" y="${Hpx - 6}">${sb} m</text></g>`);
+  out.push(compact
+    ? `<text class="side-t sm" x="${X(xL) + 4}" y="${mt - 6}">RETAINED</text><text class="side-t sm" x="${X(xR) - 4}" y="${mt - 6}" text-anchor="end">EXCAVATION</text>`
+    : `<text class="side-t" x="${X(xL) + 8}" y="${mt - 8}">RETAINED SIDE (ACTIVE)</text><text class="side-t" x="${X(xR) - 8}" y="${mt - 8}" text-anchor="end">EXCAVATION SIDE (PASSIVE)</text>`);
+  if (opts.title) out.push(`<text class="ttl${compact ? ' sm' : ''}" x="${ml}" y="${compact ? 18 : 24}">${esc(opts.title)}</text>${opts.subtitle ? `<text class="ttl-sub" x="${ml}" y="${compact ? 33 : 44}">${esc(opts.subtitle)}</text>` : ''}`);
+  return `<svg viewBox="0 0 ${W} ${Hpx.toFixed(0)}" role="img" ${hid ? `data-sec="${hid}"` : ''} aria-label="${esc(opts.title || 'Wall cross-section')}, stage ${stageNo}">
+  <style>
+    .soil-1{fill:var(--soil-1)} .soil-2{fill:var(--soil-2)} .soil-3{fill:var(--soil-3)} .soil-4{fill:var(--soil-4)}
+    .faded{opacity:.5}
+    .stratum{stroke:var(--soil-line);stroke-width:1;stroke-dasharray:6 4}
+    .soil-label{fill:var(--ink-2);font-size:12px;font-weight:600;letter-spacing:.04em}
+    .ground{stroke:var(--ink);stroke-width:1.6} .hatch{stroke:var(--ink-2);stroke-width:1}
+    .boundary{stroke:var(--muted);stroke-width:1.2;stroke-dasharray:2 3}
+    .water{stroke:var(--water);stroke-width:1.5;stroke-dasharray:8 5} .water-sym{fill:var(--water)}
+    .wall{stroke:var(--wall);stroke-width:${compact ? 4 : 7};stroke-linecap:butt}
+    .anchor line{stroke:var(--anchor);stroke-width:${compact ? 1.8 : 2.5}} .anchor .bond{stroke-width:${compact ? 4 : 6};stroke-opacity:.45;stroke-linecap:round} .anchor rect{fill:var(--anchor)}
+    .anchor.ghost line,.anchor.ghost rect{stroke:var(--muted);fill:var(--muted);stroke-dasharray:4 4;opacity:.6}
+    .anchor-label{fill:var(--anchor);font-size:13px;font-weight:700;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label.ghost{fill:var(--muted);font-weight:400}
+    .anchor-sub{fill:var(--ink);font-size:12px;font-family:var(--font-mono);paint-order:stroke;stroke:var(--soil-2);stroke-width:3px}
+    .sur line{stroke:var(--ink-2);stroke-width:1.2} .sur path{fill:var(--ink-2)} .sur text{fill:var(--ink);font-size:12px} .sur.ghost{opacity:.35}
+    .dim line,.dim path{stroke:var(--ink-2);stroke-width:1;fill:none} .dim text{fill:var(--ink);font-size:12px}
+    .leader{stroke:var(--muted);stroke-width:.8}
+    .lvl{fill:var(--ink);font-size:13px} .lvl.sm{font-size:10.5px;font-family:var(--font-mono)} .lvl-v{font-weight:500} .lvl-t{fill:var(--muted);font-size:11px}
+    .anchor-t{fill:var(--anchor)} .water-t{fill:var(--water)}
+    .scale line{stroke:var(--ink-2);stroke-width:1.2} .scale text{fill:var(--ink-2);font-size:11px}
+    .side-t{fill:var(--muted);font-size:10.5px;letter-spacing:.09em;font-weight:600} .side-t.sm{font-size:9px}
+    .ttl{fill:var(--ink);font-size:20px;font-weight:700;font-family:var(--font-display);font-stretch:87%} .ttl.sm{font-size:14px}
+    .ttl-sub{fill:var(--ink-2);font-size:12px}
+    .pk{fill:var(--ink);font-size:${compact ? 11 : 12.5}px;font-family:var(--font-mono);font-weight:500;paint-order:stroke;stroke:var(--surface);stroke-width:3px}
+    .pk.main{font-weight:700;font-size:${compact ? 12.5 : 14}px}
+    .pk-sub{fill:var(--ink-2);font-size:${compact ? 9.5 : 11}px;font-family:var(--font-mono);paint-order:stroke;stroke:var(--surface);stroke-width:3px}
+    .hov line{stroke:var(--ink);stroke-width:1;stroke-dasharray:3 3}
+  </style>
+  ${out.join('\n')}</svg>`;
+}
+function stageForces(R, stageNo) { const f = {}; for (const r of strutForceRows(R)) if (r.stage === stageNo) f[r.no] = r; return f; }
+function govAnchors(R) { const g = {}; for (const r of strutForceRows(R)) if (!g[r.no] || r.axial > g[r.no].axial) g[r.no] = r; return g; }
+function wireSections(root) {
+  root.querySelectorAll('svg[data-sec]').forEach(svg => {
+    const d = secData[svg.dataset.sec]; if (!d) return;
+    const box = svg.closest('.drawing'); const tip = box.querySelector('.tip'); const hov = svg.querySelector('.hov'); const line = hov.querySelector('line');
+    const move = e => {
+      const r = svg.getBoundingClientRect(); const k = d.H / r.height; const py = (e.clientY - r.top) * k;
+      const y = d.yTop - (py - d.mt) / d.s;
+      const ref = d.curves[0].pts; if (!ref.length) return;
+      let bi = 0; ref.forEach((p, i) => { if (Math.abs(p.y - y) < Math.abs(ref[bi].y - y)) bi = i; });
+      const yy = ref[bi].y; if (Math.abs(yy - y) > 1.5) { hov.setAttribute('visibility', 'hidden'); tip.hidden = true; return; }
+      const ly = d.mt + (d.yTop - yy) * d.s; line.setAttribute('y1', ly); line.setAttribute('y2', ly); hov.setAttribute('visibility', 'visible');
+      tip.innerHTML = `<div style="color:var(--muted)">El. ${el(yy)}</div>` + d.curves.map(c => { const vals = c.pts.filter(p => Math.abs(p.y - yy) < 1e-6).map(p => d.fmt(p.v)); return `<div><span style="color:${c.color}">■</span> ${esc(c.name)} <b>${vals.join(' / ')}</b></div>`; }).join('');
+      tip.hidden = false;
+      const bb = box.getBoundingClientRect();
+      const top = r.top - bb.top + ly / k + box.scrollTop;
+      tip.style.top = Math.min(top + 10, r.height - 60 + (r.top - bb.top)) + 'px'; tip.style.left = (r.left - bb.left + 8 + box.scrollLeft) + 'px';
+    };
+    svg.addEventListener('pointermove', move); svg.addEventListener('pointerdown', move);
+    svg.addEventListener('pointerleave', () => { hov.setAttribute('visibility', 'hidden'); tip.hidden = true; });
+  });
+}
+
+function renderSection(el0) {
+  const R = S.R, u = U();
+  const st = R.derived.stageState.find(s => s.stage === S.secStage) || R.derived.stageState[R.derived.stageState.length - 1];
+  const toe = R.wall.toe, top = R.derived.wallTop;
+  const anchorsOn = R.struts.filter(a => st?.struts.includes(a.no));
+  const forces = stageForces(R, st?.stage);
+  const notes = st?.notes?.length ? `<div class="msg">${st.notes.map(esc).join('<br>')}</div>` : '';
+  el0.innerHTML = `
+  <div class="panel">
+    <div class="panel-head"><h2>Wall section · stage ${st?.stage ?? ''}</h2><span class="hint">Drawn to scale from the report. Pick a construction stage.</span></div>
+    ${R.stages.length ? stepper(R.stages, st?.stage, 'data-sec') : ''}
+  </div>
+  <div class="two">
+    <div class="panel"><div class="drawing">${sectionSVG(R, st?.stage, { forces })}</div>
+      <div class="legend" style="margin-top:10px">
+        ${[...new Set(R.strata.map(s => s.activeSoil))].map(no => { const so = R.soils.find(x => x.no === no); return `<span><span class="swatch" style="background:var(--${soilClass(no)})"></span>${esc(so?.name || 'Soil ' + no)}</span>`; }).join('')}
+        <span><i class="dash" style="border-color:var(--water)"></i>Water table</span>
+        ${R.struts.length ? `<span><i style="border-color:var(--anchor)"></i>Anchor (free length)</span>` : ''}
+      </div>
+    </div>
+    <div class="panel">
+      <h3 style="margin-bottom:6px">Key levels</h3>
+      <div class="keys">
+        <div><span>Top of wall</span><b>${el(top)}</b></div>
+        <div><span>Retained ground</span><b>${el(st?.glActive)}</b></div>
+        <div><span>Excavation level</span><b>${el(st?.glPassive)}</b></div>
+        <div><span>Toe of wall</span><b>${el(toe)}</b></div>
+        <div><span>Retained height</span><b>${(top - st.glPassive).toFixed(2)} m</b></div>
+        <div><span>Embedment</span><b>${(st.glPassive - toe).toFixed(2)} m</b></div>
+        <div><span>Total wall length</span><b>${(top - toe).toFixed(2)} m</b></div>
+        <div><span>Water table (ret. / exc.)</span><b>${el(st?.waterActive)} / ${el(st?.waterPassive)}</b></div>
+        ${R.options.lowerBoundary != null ? `<div><span>Rigid lower boundary</span><b>${el(R.options.lowerBoundary)}</b></div>` : ''}
+      </div>
+      ${anchorsOn.length ? `<h3 style="margin:14px 0 6px">Anchors in this stage</h3><div class="keys">${anchorsOn.map(a => `<div><span>A${a.no} at ${el(a.elev)}, ${a.incl ?? 0}°</span><b>${forces[a.no] ? fF(forces[a.no].axial) + ' ' + u.F : 'no force output'}</b></div>`).join('')}</div>` : ''}
+      ${st?.surcharges.length ? `<h3 style="margin:14px 0 6px">Surcharge</h3><div class="keys">${R.surcharges.filter(s => st.surcharges.includes(s.no)).map(s => `<div><span>No. ${s.no}, ${s.dist} m from wall</span><b>${fF(s.qNear, 2)} ${u.P}</b></div>`).join('')}</div>` : ''}
+    </div>
+  </div>${notes}`;
+  el0.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => { S.secStage = +b.dataset.sec; render(); });
+}
+
+// ---------- PROFILE CHART (elevation on y, value on x)
+let chartSeq = 0;
+function profileChart({ title, unit, series, yDom, levels = [], fmt = v => v.toFixed(1), markers = [], reverse = false }) {
+  const id = 'c' + (++chartSeq);
+  const W = 300, H = 440, ml = 40, mr = 14, mt = 12, mb = 28;
+  let lo = 0, hi = 0;
+  for (const s of series) for (const p of s.pts) { if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v; }
+  if (hi - lo < 1e-9) { hi = 1; lo = -1; }
+  const pad = (hi - lo) * 0.14; lo -= pad; hi += pad;
+  const step = niceStep((hi - lo) / 4);
+  lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  const [y0, y1] = yDom;
+  const X = v => ml + (reverse ? hi - v : v - lo) / (hi - lo) * (W - ml - mr), Y = y => mt + (y1 - y) / (y1 - y0) * (H - mt - mb);
+  const g = [];
+  for (let v = lo; v <= hi + step / 2; v += step) g.push(`<line x1="${X(v)}" x2="${X(v)}" y1="${mt}" y2="${H - mb}" class="gr${Math.abs(v) < step / 1e3 ? ' zero' : ''}"/><text x="${X(v)}" y="${H - mb + 15}" text-anchor="middle" class="ax">${+v.toFixed(6)}</text>`);
+  const ys = niceStep((y1 - y0) / 7);
+  for (let y = Math.ceil(y0 / ys) * ys; y <= y1 + 1e-9; y += ys) g.push(`<line x1="${ml}" x2="${W - mr}" y1="${Y(y)}" y2="${Y(y)}" class="gr"/><text x="${ml - 5}" y="${Y(y) + 4}" text-anchor="end" class="ax">${+y.toFixed(2)}</text>`);
+  for (const l of levels) g.push(`<line x1="${ml}" x2="${W - mr}" y1="${Y(l.y)}" y2="${Y(l.y)}" class="lv ${l.c || ''}"/><text x="${W - mr - 2}" y="${Y(l.y) - 3}" text-anchor="end" class="lvt ${l.c || ''}">${l.t}</text>`);
+  for (const s of series) {
+    if (!s.pts.length) continue;
+    const d = s.pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.v).toFixed(1)} ${Y(p.y).toFixed(1)}`).join('');
+    if (s.band) { const b = s.band; const dd = b.hi.map((p, i) => `${i ? 'L' : 'M'}${X(p.v)} ${Y(p.y)}`).join('') + b.lo.slice().reverse().map(p => `L${X(p.v)} ${Y(p.y)}`).join('') + 'Z'; g.push(`<path d="${dd}" style="fill:var(--surface-2)" />`); }
+    if (s.fill) g.push(`<path d="${d}L${X(0)} ${Y(s.pts[s.pts.length - 1].y)}L${X(0)} ${Y(s.pts[0].y)}Z" style="fill:${s.color};fill-opacity:.12"/>`);
+    g.push(`<path d="${d}" style="fill:none;stroke:${s.color};stroke-width:${s.w || 2};${s.dash ? 'stroke-dasharray:' + s.dash : ''};stroke-linejoin:round"/>`);
+  }
+  for (const m of markers) { const px = X(m.v), py = Y(m.y); const right = px < (W - ml) / 2 + ml; g.push(`<circle cx="${px}" cy="${py}" r="4.5" style="fill:${m.color};stroke:var(--surface);stroke-width:2"/><text x="${px + (right ? 8 : -8)}" y="${py + 4}" text-anchor="${right ? 'start' : 'end'}" class="mk">${fmt(m.v)}</text>`); }
+  const data = { lo, hi, y0, y1, W, H, ml, mr, mt, mb, series: series.filter(s => !s.noTip).map(s => ({ name: s.name, color: s.color, pts: s.pts })) };
+  chartData[id] = { ...data, fmt, unit };
+  return `<div class="chart" id="${id}"><h3>${title} <span class="unit">${unit}</span></h3>
+  <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)} along the wall">
+  <style>#${id} .gr{stroke:var(--grid);stroke-width:1} #${id} .gr.zero{stroke:var(--muted);stroke-width:1.2} #${id} .ax{fill:var(--muted);font-size:10px;font-family:var(--font-mono)}
+  #${id} .lv{stroke:var(--ink-2);stroke-width:1;stroke-dasharray:3 3} #${id} .lvt{fill:var(--ink-2);font-size:9.5px} #${id} .lv.anchor-t{stroke:var(--anchor)} #${id} .lvt.anchor-t{fill:var(--anchor)}
+  #${id} .mk{fill:var(--ink);font-size:11px;font-weight:600;font-family:var(--font-mono);paint-order:stroke;stroke:var(--surface);stroke-width:3px} #${id} .xh{stroke:var(--ink);stroke-width:1;stroke-dasharray:2 2}</style>
+  ${g.join('')}<line class="xh" x1="${ml}" x2="${W - mr}" y1="0" y2="0" visibility="hidden"/>
+  <rect x="${ml}" y="${mt}" width="${W - ml - mr}" height="${H - mt - mb}" fill="transparent" class="hit"/></svg><div class="tip" hidden></div></div>`;
+}
+const chartData = {};
+function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))); const n = raw / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p; }
+function wireCharts(root) {
+  const charts = [...root.querySelectorAll('.chart')];
+  const hide = () => charts.forEach(c => { c.querySelector('.xh').setAttribute('visibility', 'hidden'); c.querySelector('.tip').hidden = true; });
+  const show = (y) => {
+    for (const c of charts) {
+      const d = chartData[c.id]; if (!d) continue;
+      const Yp = yy => d.mt + (d.y1 - yy) / (d.y1 - d.y0) * (d.H - d.mt - d.mb);
+      const svg = c.querySelector('svg'), xh = c.querySelector('.xh'), tip = c.querySelector('.tip');
+      const rows = [];
+      let yy = null;
+      for (const s of d.series) {
+        let best = null; for (const p of s.pts) if (!best || Math.abs(p.y - y) < Math.abs(best[0].y - y)) best = [p]; else if (Math.abs(p.y - best[0].y) < 1e-9) best.push(p);
+        if (!best) continue; yy = best[0].y;
+        rows.push(`<div><span style="color:${s.color}">■</span> ${esc(s.name)} <b>${best.map(p => d.fmt(p.v)).join(' / ')}</b></div>`);
+      }
+      if (yy == null) continue;
+      const py = Yp(yy); xh.setAttribute('y1', py); xh.setAttribute('y2', py); xh.setAttribute('visibility', 'visible');
+      tip.innerHTML = `<div style="color:var(--muted)">El. ${el(yy)}</div>${rows.join('')}`; tip.hidden = false;
+      const r = svg.getBoundingClientRect(), k = r.width / d.W, off = r.top - c.getBoundingClientRect().top;
+      const top = off + py * k;
+      tip.style.left = (d.ml * k + 6) + 'px'; tip.style.top = Math.max(off, Math.min(top + 8, off + r.height - 70)) + 'px';
+    }
+  };
+  for (const c of charts) {
+    const d = chartData[c.id]; const hit = c.querySelector('.hit'); const svg = c.querySelector('svg');
+    const move = e => { const r = svg.getBoundingClientRect(); const k = d.H / r.height; const py = (e.clientY - r.top) * k; const y = d.y1 - (py - d.mt) / (d.H - d.mt - d.mb) * (d.y1 - d.y0); show(y); };
+    hit.addEventListener('pointermove', move); hit.addEventListener('pointerdown', move); hit.addEventListener('pointerleave', hide);
+  }
+}
+function yDomain(R) { const top = R.derived.wallTop, toe = R.wall.toe ?? top - 10; const lowB = R.options.lowerBoundary; return [Math.min(toe, lowB ?? toe) - 0.3, top + 0.3]; }
+function chartLevels(R, stageNo) {
+  const st = R.derived.stageState.find(s => s.stage === stageNo);
+  const lv = [];
+  if (st && st.glPassive < R.derived.wallTop - 0.01) lv.push({ y: st.glPassive, t: 'Exc. ' + st.glPassive.toFixed(2) });
+  for (const a of R.struts) if (!st || st.struts.includes(a.no)) lv.push({ y: a.elev, t: 'A' + a.no, c: 'anchor-t' });
+  if (R.wall.toe != null) lv.push({ y: R.wall.toe, t: 'Toe' });
+  return lv;
+}
+
+// ---------- FORCES
+function renderForces(el0) {
+  const R = S.R, u = U(); chartSeq = 0;
+  const env = envelope(R); const detail = Object.keys(R.results).map(Number);
+  const isEnv = S.forceStage === 'env' || !R.results[S.forceStage];
+  const yd = yDomain(R);
+  const f = u.f;
+  const noDetail = R.stages.filter(s => !detail.includes(s.no)).map(s => s.no);
+  let charts = '';
+  if (isEnv) {
+    const P = k => env.map(e => ({ y: e.y, v: e[k] * f }));
+    const Pd = k => env.map(e => ({ y: e.y, v: e[k] * 1000 }));
+    const mk = (arr, k, color, sign) => { const e = arr.reduce((b, x) => (sign * x[k] > sign * b[k] ? x : b), arr[0]); return { y: e.y, v: e[k] * (k[0] === 'd' ? 1000 : f), color }; };
+    const lv = chartLevels(R, R.stages.length ? R.stages[R.stages.length - 1].no : null);
+    charts = profileChart({ title: 'Bending moment', reverse: true, unit: u.M, yDom: yd, levels: lv, series: [{ name: 'Max', pts: P('MMax'), color: 'var(--s1)', band: { hi: P('MMax'), lo: P('MMin') } }, { name: 'Min', pts: P('MMin'), color: 'var(--s2)' }], markers: [mk(env, 'MMax', 'var(--s1)', 1), mk(env, 'MMin', 'var(--s2)', -1)] })
+      + profileChart({ title: 'Shear force', unit: u.Fm, yDom: yd, levels: lv, series: [{ name: 'Max', pts: P('VMax'), color: 'var(--s1)', band: { hi: P('VMax'), lo: P('VMin') } }, { name: 'Min', pts: P('VMin'), color: 'var(--s2)' }], markers: [mk(env, 'VMax', 'var(--s1)', 1), mk(env, 'VMin', 'var(--s2)', -1)] })
+      + profileChart({ title: 'Displacement', unit: 'mm', yDom: yd, levels: lv, fmt: v => v.toFixed(0), series: [{ name: 'Max', pts: Pd('dMax'), color: 'var(--s1)' }, { name: 'Min', pts: Pd('dMin'), color: 'var(--s2)', dash: '5 4' }], markers: [mk(env, 'dMax', 'var(--s1)', 1)] });
+  } else {
+    const r = R.results[S.forceStage];
+    const P = k => r.nodes.map(n => ({ y: n.y, v: n[k] * (k === 'disp' ? 1000 : f) }));
+    const E = k => env.map(e => ({ y: e.y, v: e[k] * f }));
+    const ext = (k, sign) => { const n = r.nodes.reduce((b, x) => (sign * x[k] > sign * b[k] ? x : b), r.nodes[0]); return { y: n.y, v: n[k] * (k === 'disp' ? 1000 : f), color: 'var(--s1)' }; };
+    const lv = chartLevels(R, r.no);
+    const envBand = (a, b) => env.length ? [{ name: 'Envelope', pts: [], color: 'var(--muted)', band: { hi: E(a), lo: E(b) }, noTip: true }] : [];
+    const withBand = (a, b, s) => { const eb = envBand(a, b); if (!eb.length) return [s]; eb[0].pts = E(a); eb[0].w = 1; return [...eb, { name: 'Envelope min', pts: E(b), color: 'var(--muted)', w: 1, noTip: true }, s]; };
+    const mMax = ext('M', 1), mMin = ext('M', -1), vMax = ext('V', 1), vMin = ext('V', -1);
+    charts = profileChart({ title: 'Bending moment', reverse: true, unit: u.M, yDom: yd, levels: lv, series: withBand('MMax', 'MMin', { name: 'Stage ' + r.no, pts: P('M'), color: 'var(--s1)', fill: true }), markers: [mMax, mMin].filter((m, i, a) => i === 0 || Math.abs(m.v) > 0.05 && m.y !== a[0].y) })
+      + profileChart({ title: 'Shear force', unit: u.Fm, yDom: yd, levels: lv, series: withBand('VMax', 'VMin', { name: 'Stage ' + r.no, pts: P('V'), color: 'var(--s1)', fill: true }), markers: [vMax, vMin].filter((m, i) => i === 0 || Math.abs(m.v) > 0.05) })
+      + profileChart({ title: 'Displacement', unit: 'mm', yDom: yd, levels: lv, fmt: v => v.toFixed(0), series: [{ name: 'Stage ' + r.no, pts: P('disp'), color: 'var(--s1)' }], markers: [ext('disp', 1)] });
+  }
+  const sm = R.summary.stageMax;
+  el0.innerHTML = `
+  <div class="panel">
+    <div class="panel-head"><h2>Moments, shear and displacement</h2><span class="hint">Hover or tap a chart to read values at any level.</span></div>
+    <div class="stepper" role="group" aria-label="Stage">
+      <button type="button" data-fs="env" aria-pressed="${isEnv}"><b>All stages</b><span>Envelope (max / min)</span></button>
+      ${R.stages.map(s => `<button type="button" data-fs="${s.no}" aria-pressed="${!isEnv && S.forceStage == s.no}" ${detail.includes(s.no) ? '' : 'disabled title="No detailed output for this stage in the report"'}><b>Stage ${s.no}</b><span>${esc(s.desc)}</span></button>`).join('')}
+    </div>
+    ${noDetail.length ? `<p class="hint" style="margin:8px 0 0">Stage${noDetail.length > 1 ? 's' : ''} ${noDetail.join(', ')} ${noDetail.length > 1 ? 'have' : 'has'} only summary values in this report (see the table below).</p>` : ''}
+  </div>
+  <div class="panel">
+    <div class="legend" style="margin-bottom:10px"><span>Moment axis as in WALLAP: + to the left (retained side)</span>${isEnv ? `<span><i style="border-color:var(--s1)"></i>Maximum</span><span><i style="border-color:var(--s2)"></i>Minimum</span><span><span class="swatch" style="background:var(--surface-2);border-color:var(--line)"></span>Range</span>` : `<span><i style="border-color:var(--s1)"></i>Stage ${S.forceStage}</span>${env.length ? `<span><span class="swatch" style="background:var(--surface-2);border-color:var(--line)"></span>Envelope of all stages</span>` : ''}`}</div>
+    <div class="charts">${charts}</div>
+  </div>
+  ${sm.length ? `<div class="panel"><div class="panel-head"><h2>Governing values by stage</h2></div><div class="tscroll"><table>
+    <thead><tr><th class="l">Stage</th><th>M max<small>${u.M}</small></th><th>at el.</th><th>M min<small>${u.M}</small></th><th>at el.</th><th>V max<small>${u.Fm}</small></th><th>at el.</th><th>V min<small>${u.Fm}</small></th><th>at el.</th></tr></thead>
+    <tbody>${sm.map(s => `<tr><td class="l">${s.stage}</td><td>${fF(s.MMax)}</td><td>${el(s.MMaxElev)}</td><td>${fF(s.MMin)}</td><td>${el(s.MMinElev)}</td><td>${fF(s.VMax)}</td><td>${el(s.VMaxElev)}</td><td>${fF(s.VMin)}</td><td>${el(s.VMinElev)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+  ${nodeTable(R, isEnv ? null : R.results[S.forceStage], env)}`;
+  el0.querySelectorAll('[data-fs]').forEach(b => b.onclick = () => { S.forceStage = b.dataset.fs === 'env' ? 'env' : +b.dataset.fs; render(); });
+  wireCharts(el0);
+}
+function nodeTable(R, r, env) {
+  const u = U();
+  if (r) return `<details class="panel"><summary><h3 style="display:inline">Node values, stage ${r.no}</h3></summary><div class="tscroll" style="margin-top:10px"><table><thead><tr><th class="l">Node</th><th>Elev.</th><th>Net pressure<small>${u.P}</small></th><th>Displ.<small>mm</small></th><th>Rotation<small>rad</small></th><th>Shear<small>${u.Fm}</small></th><th>Moment<small>${u.M}</small></th><th>Anchor<small>${u.Fm}</small></th></tr></thead><tbody>
+  ${r.nodes.map(n => `<tr><td class="l">${n.sub ? '' : n.node}</td><td>${n.sub ? '' : n.y.toFixed(2)}</td><td>${fF(n.nett, 2)}</td><td>${mm(n.disp)}</td><td>${n.rot.toExponential(2)}</td><td>${fF(n.V)}</td><td>${fF(n.M)}</td><td>${n.strut != null ? fF(n.strut) : ''}</td></tr>`).join('')}</tbody></table></div></details>`;
+  if (!env.length) return '';
+  return `<details class="panel"><summary><h3 style="display:inline">Envelope node values</h3></summary><div class="tscroll" style="margin-top:10px"><table><thead><tr><th class="l">Node</th><th>Elev.</th><th>Displ. max<small>mm</small></th><th>Displ. min<small>mm</small></th><th>M max<small>${u.M}</small></th><th>M min<small>${u.M}</small></th><th>V max<small>${u.Fm}</small></th><th>V min<small>${u.Fm}</small></th></tr></thead><tbody>
+  ${env.map(e => `<tr><td class="l">${e.node}</td><td>${e.y.toFixed(2)}</td><td>${mm(e.dMax)}</td><td>${mm(e.dMin)}</td><td>${fF(e.MMax)}</td><td>${fF(e.MMin)}</td><td>${fF(e.VMax)}</td><td>${fF(e.VMin)}</td></tr>`).join('')}</tbody></table></div></details>`;
+}
+
+// ---------- LOADS
+function renderLoads(el0) {
+  const R = S.R, u = U(); chartSeq = 0;
+  const detail = Object.keys(R.results).map(Number);
+  const r = R.results[S.loadStage] || R.results[detail[detail.length - 1]];
+  const yd = yDomain(R);
+  const soilTop = no => { const s = R.strata.filter(x => x.activeSoil === no).map(x => x.top); return s.length ? Math.max(...s) : null; };
+  let charts = '';
+  if (r) {
+    const f = u.f; const lv = chartLevels(R, r.no);
+    const P = (arr, k) => arr.filter(n => !(k === 'total' && false)).map(n => ({ y: n.y, v: n[k] * f }));
+    const act = r.active, pas = r.passive.filter(n => n.k > 0 || n.total > 0 || n.water > 0);
+    const pasAll = r.passive;
+    charts = profileChart({ title: 'Retained side (active)', unit: u.P, yDom: yd, levels: lv, fmt: v => v.toFixed(2), series: [
+        { name: 'Total pressure', pts: P(act, 'total'), color: 'var(--s1)', fill: true },
+        { name: 'Water', pts: P(act, 'water'), color: 'var(--water)', dash: '5 4', w: 1.5 },
+        { name: 'Active limit', pts: P(act, 'alim'), color: 'var(--muted)', dash: '1 3', w: 1.5 }] })
+      + profileChart({ title: 'Excavation side (passive)', unit: u.P, yDom: yd, levels: lv, fmt: v => v.toFixed(2), series: [
+        { name: 'Total pressure', pts: P(pasAll, 'total'), color: 'var(--s2)', fill: true },
+        { name: 'Water', pts: P(pasAll, 'water'), color: 'var(--water)', dash: '5 4', w: 1.5 },
+        { name: 'Passive limit', pts: P(pasAll, 'plim'), color: 'var(--muted)', dash: '1 3', w: 1.5, noTip: false }] })
+      + profileChart({ title: 'Net pressure on wall', unit: u.P, yDom: yd, levels: lv, fmt: v => v.toFixed(2), series: [{ name: 'Net', pts: r.nodes.map(n => ({ y: n.y, v: n.nett * f })), color: 'var(--s3)', fill: true }] });
+    void pas;
+  }
+  const water = R.water;
+  el0.innerHTML = `
+  <div class="panel">
+    <div class="panel-head"><h2>Soil layers the consultant used</h2><span class="hint">Densities above / below the water table</span></div>
+    <div class="tscroll"><table><thead><tr><th class="l">Soil</th><th>Top el.</th><th>γ above WT<small>${u.Gm}</small></th><th>γ below WT<small>${u.Gm}</small></th><th>φ'<small>deg</small></th><th>c'<small>${u.P}</small></th><th>Ka</th><th>Kp</th><th>K0</th><th>E<small>${u.P}</small></th></tr></thead><tbody>
+    ${R.soils.map(s => `<tr><td class="l"><span class="swatch" style="background:var(--${soilClass(s.no)})"></span>${esc(s.name)}</td><td>${el(soilTop(s.no))}</td><td>${fF(s.gammaAbove, 2)}</td><td>${fF(s.gammaBelow, 2)}</td><td>${fx(s.phiA, 1)}</td><td>${fF(s.c, 2)}</td><td>${fx(s.Ka, 3)}</td><td>${fx(s.Kp, 3)}</td><td>${fx(s.K0, 3)}</td><td>${s.E != null ? Math.round(s.E * u.f).toLocaleString('en-US') : '–'}</td></tr>`).join('')}
+    </tbody></table></div>
+  </div>
+  <div class="two" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+    <div class="panel"><h3 style="margin-bottom:6px">Water</h3><div class="keys">
+      <div><span>Water table, retained side</span><b>${el(water.active)}</b></div>
+      <div><span>Water table, excavation side</span><b>${el(water.passive)}</b></div>
+      <div><span>Unit weight of water</span><b>${fF(water.density, 2)} ${u.Gm}</b></div>
+      <div><span>Pressure balancing at toe</span><b>${esc(water.balancing || '–')}</b></div></div></div>
+    <div class="panel"><h3 style="margin-bottom:6px">Surcharge loads</h3>${R.surcharges.length ? `<div class="tscroll"><table><thead><tr><th class="l">No.</th><th>Side</th><th>Elev.</th><th>From wall<small>m</small></th><th>Width<small>m</small></th><th>Length<small>m</small></th><th>q<small>${u.P}</small></th><th class="l">Applied</th></tr></thead><tbody>
+      ${R.surcharges.map(s => { const stg = R.stages.find(x => new RegExp('surcharge no\\.\\s*' + s.no + '\\b', 'i').test(x.desc) && /apply/i.test(x.desc)); return `<tr><td class="l">${s.no}</td><td>${s.side === 'active' ? 'Retained' : 'Excavation'}</td><td>${el(s.elev)}</td><td>${fx(s.dist, 2)}</td><td>${s.width != null ? fx(s.width, 2) : '∞'}</td><td>${s.length != null ? fx(s.length, 2) : '∞'}</td><td>${fF(s.qNear, 2)}${s.qFar !== s.qNear ? ' → ' + fF(s.qFar, 2) : ''}</td><td class="l">${stg ? 'Stage ' + stg.no : '–'}</td></tr>`; }).join('')}</tbody></table></div>` : '<p class="hint">No surcharge loads in this report.</p>'}</div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><h2>Pressure on the wall</h2><span class="hint">Soil + water pressure calculated by WALLAP for the selected stage</span></div>
+    ${detail.length ? `<div class="stepper" role="group" aria-label="Stage">${R.stages.map(s => `<button type="button" data-ls="${s.no}" aria-pressed="${r && s.no === r.no}" ${detail.includes(s.no) ? '' : 'disabled title="No pressure output for this stage in the report"'}><b>Stage ${s.no}</b><span>${esc(s.desc)}</span></button>`).join('')}</div>` : '<p class="hint">This report has no pressure output per stage.</p>'}
+    ${r ? `<div class="legend" style="margin:12px 0 10px"><span><i style="border-color:var(--s1)"></i>Total pressure, retained side</span><span><i style="border-color:var(--s2)"></i>Total pressure, excavation side</span><span><i class="dash" style="border-color:var(--water)"></i>Water pressure</span><span><i class="dot" style="border-color:var(--muted)"></i>Active / passive limit</span><span><i style="border-color:var(--s3)"></i>Net pressure</span></div><div class="charts">${charts}</div>` : ''}
+  </div>`;
+  el0.querySelectorAll('[data-ls]').forEach(b => b.onclick = () => { S.loadStage = +b.dataset.ls; render(); });
+  wireCharts(el0);
+}
+
+// ---------- ANCHORS
+// ---------- SUMMARY (first page)
+function soilLegend(R) {
+  return [...new Set(R.strata.map(s => s.activeSoil))].map(no => { const so = R.soils.find(x => x.no === no); return `<span><span class="swatch" style="background:var(--${soilClass(no)})"></span>${esc(so?.name || 'Soil ' + no)}</span>`; }).join('');
+}
+function renderOverview(el0) {
+  const R = S.R, u = U(), f = u.f;
+  const lastNo = R.stages.length ? R.stages[R.stages.length - 1].no : null;
+  const st = R.derived.stageState.find(s => s.stage === lastNo) || R.derived.stageState[R.derived.stageState.length - 1];
+  const gov = govAnchors(R), env = envelope(R), name = sectionName(R), K = keyNumbers(R);
+  const top = R.derived.wallTop, toe = R.wall.toe;
+  const P = k => env.map(e => ({ y: e.y, v: e[k] * f }));
+  const Pd = k => env.map(e => ({ y: e.y, v: e[k] * 1000 }));
+  const hasDmin = env.some(e => Math.abs(e.dMin) > 0.0005);
+  const trio = env.length ? [
+    { t: 'Bending moment', k: 'M', unit: u.M, sum: K.Mpos && K.Mneg ? `max ${fF(K.Mpos.v)} at ${el(K.Mpos.y)} · min ${fF(K.Mneg.v)} at ${el(K.Mneg.y)}` : '',
+      d: { dir: -1, fmt: v => fx(v, 1), unit: u.M, curves: [{ name: 'Max', color: 'var(--s1)', pts: P('MMax') }, { name: 'Min', color: 'var(--s2)', pts: P('MMin') }] },
+      note: '+M drawn on the retained side, as in WALLAP' },
+    { t: 'Shear force', k: 'V', unit: u.Fm, sum: K.V ? `max |V| ${fF(Math.abs(K.V.v))} at ${el(K.V.y)}` : '',
+      d: { dir: 1, fmt: v => fx(v, 1), unit: u.Fm, curves: [{ name: 'Max', color: 'var(--s1)', pts: P('VMax') }, { name: 'Min', color: 'var(--s2)', pts: P('VMin') }] },
+      note: '+V drawn toward the excavation' },
+    { t: 'Displacement', k: 'D', unit: 'mm', sum: K.D ? `max ${mm(K.D.v)} mm at ${el(K.D.y)}` : '',
+      d: { dir: 1, fmt: v => fx(v, 0), unit: 'mm', curves: [{ name: 'Max', color: 'var(--s1)', pts: Pd('dMax') }, ...(hasDmin ? [{ name: 'Min', color: 'var(--s2)', pts: Pd('dMin') }] : [])] },
+      note: 'Movement toward the excavation is positive' }
+  ] : [];
+  const target = R.options.fosTarget;
+  el0.innerHTML = `
+  <div class="two">
+    <div class="panel">
+      <div class="panel-head"><h2>Final section and anchors</h2><span class="hint">Stage ${lastNo ?? '–'}: ${esc(st?.desc || '')}</span>${R.struts.length ? quickExp('anchors') : ''}</div>
+      <div class="drawing">${sectionSVG(R, lastNo, { forces: gov, title: name, subtitle: `Final section · stage ${lastNo ?? ''} · anchor levels and maximum anchor forces` })}</div>
+      <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i class="dash" style="border-color:var(--water)"></i>Water table</span>${R.struts.length ? `<span><i style="border-color:var(--anchor)"></i>Anchor: T along anchor, H horizontal per m</span>` : ''}</div>
+    </div>
+    <div class="panel">
+      <h3 style="margin-bottom:6px">Final section</h3>
+      <div class="keys">
+        <div><span>Top of wall</span><b>${el(top)}</b></div>
+        <div><span>Excavation level</span><b>${el(st?.glPassive)}</b></div>
+        <div><span>Toe of wall</span><b>${el(toe)}</b></div>
+        <div><span>Retained height</span><b>${(top - st.glPassive).toFixed(2)} m</b></div>
+        <div><span>Embedment</span><b>${(st.glPassive - toe).toFixed(2)} m</b></div>
+        <div><span>Water table</span><b>${el(st?.waterActive)}</b></div>
+        ${K.F ? `<div><span>Min FoS (stage ${K.F.stage})</span><b>${K.F.fos.toFixed(2)}${target ? (K.F.fos >= target ? ' ✓' : ' ▼') : ''}</b></div>` : ''}
+      </div>
+      ${R.struts.length ? `<h3 style="margin:16px 0 6px">Anchors</h3><div class="tscroll"><table class="compact"><thead><tr><th class="l">Row</th><th>Level</th><th>@<small>m</small></th><th>H max<small>${u.Fm}</small></th><th>T max<small>${u.F}</small></th></tr></thead><tbody>
+        ${R.struts.map(a => { const g = gov[a.no]; return `<tr><td class="l">A${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.spacing, 2)}</td><td>${g ? fF(g.perM, 2) : '–'}</td><td>${g ? fF(g.axial, 1) : '–'}</td></tr>`; }).join('')}
+      </tbody></table></div>
+      <p class="hint" style="margin:8px 0 0"><button type="button" class="link" data-goto="design">Choose anchor spacing and strands →</button></p>` : ''}
+      <h3 style="margin:16px 0 6px">Soil layers</h3>
+      <div class="keys">${R.soils.map(s => `<div><span><span class="swatch" style="background:var(--${soilClass(s.no)})"></span>${esc(s.name)}</span><b>φ' ${fx(s.phiA, 0)}° · γ ${fF(s.gammaAbove, 2)}</b></div>`).join('')}</div>
+    </div>
+  </div>
+  ${trio.length ? `<div class="panel">
+    <div class="panel-head"><h2>Envelope of all stages on the section</h2><span class="hint">Maximum and minimum from every construction stage, drawn along the wall. Hover a drawing to read any level.</span></div>
+    <div class="trio">${trio.map(t => `<div class="trio-item">
+      <div class="trio-head"><h3>${t.t} <span class="unit">${t.unit}</span></h3>${quickExp(t.k)}</div><div class="hint mono" style="margin-bottom:6px">${t.sum}</div>
+      <div class="drawing compact">${sectionSVG(R, lastNo, { compact: true, diagram: t.d })}<div class="tip" hidden></div></div>
+      <div class="legend" style="margin-top:6px"><span><i style="border-color:var(--s1)"></i>Max</span>${t.d.curves.length > 1 ? `<span><i style="border-color:var(--s2)"></i>Min</span>` : ''}<span>${t.note}</span></div>
+    </div>`).join('')}</div>
+    <p class="hint" style="margin:10px 0 0; display:flex; gap:18px; flex-wrap:wrap"><button type="button" class="link" data-goto="forces">See each stage in Moments &amp; shear →</button><button type="button" class="link" data-goto="export">All drawings at 1:100 (DXF / PDF) →</button></p>
+  </div>` : ''}`;
+  el0.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => { S.tab = b.dataset.goto; render(); scrollTo({ top: 0 }); });
+  wireSections(el0); wireQuick(el0);
+}
+
+// ---------- ANCHORS
+function renderAnchors(el0) {
+  const R = S.R, u = U();
+  if (!R.struts.length) { el0.innerHTML = `<div class="panel"><h2>Anchors</h2><p class="hint">This wall has no struts or anchors in the report.</p></div>`; return; }
+  const rows = strutForceRows(R);
+  const last = R.stages.length ? R.stages[R.stages.length - 1].no : null;
+  const gov = govAnchors(R);
+  const L = R.options.wallLength, name = sectionName(R);
+  el0.innerHTML = `
+  <div class="panel">
+    <div class="panel-head"><h2>${esc(name)} · anchor layout</h2><span class="hint">Each anchor shows its maximum force from the consultant's report</span>${quickExp('anchors')}</div>
+    <div class="drawing">${sectionSVG(R, last, { forces: gov, title: name, subtitle: 'Anchor layout · maximum force per anchor (T) and per metre of wall (H)' })}</div>
+    <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i style="border-color:var(--anchor)"></i>T = force along the anchor, H = horizontal force per m of wall</span></div>
+    <p class="hint" style="margin:8px 0 0"><button type="button" class="link" data-goto="export">Export at 1:100 (DXF / PDF) →</button></p>
+  </div>
+  <div class="anchors-grid">${R.struts.map(a => { const g = gov[a.no]; const inst = R.stages.find(s => new RegExp('(strut|anchor) no\\.\\s*' + a.no + '\\b', 'i').test(s.desc) && /install/i.test(s.desc)); return `
+    <div class="panel acard">
+      <div class="panel-head" style="margin:0"><h2>Anchor A${a.no}</h2><span class="chip">${inst ? 'installed stage ' + inst.no : ''}</span></div>
+      <div class="k-label hint" style="text-transform:uppercase;letter-spacing:.07em">Max force along anchor</div>
+      <div class="big">${g ? fF(g.axial) : '–'}<span>${u.F}/anchor</span></div>
+      <div class="keys">
+        <div><span>Level</span><b>${el(a.elev)}</b></div>
+        <div><span>Spacing</span><b>${fx(a.spacing, 2)} m</b></div>
+        <div><span>Inclination</span><b>${fx(a.incl, 1)}°</b></div>
+        <div><span>Free length</span><b>${fx(a.freeLength, 2)} m</b></div>
+        <div><span>Prestress</span><b>${fF(a.prestress, 1)} ${u.F}</b></div>
+        <div><span>Horizontal, per m of wall</span><b>${g ? fF(g.perM, 2) + ' ' + u.Fm : '–'}</b></div>
+        <div><span>Governing stage</span><b>${g ? g.stage : '–'}</b></div>
+        <div><span>Tension allowed</span><b>${esc(a.tension)}</b></div>
+      </div>
+    </div>`; }).join('')}
+    <div class="panel"><div class="panel-head"><h2>Wall elevation</h2><span class="hint">${L ? `Anchor rows along ${L} m of wall` : 'Anchor rows'}</span></div>${elevationSVG(R, gov, name)}</div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><h2>Anchor forces by stage</h2><span class="hint">Axial force = horizontal force ÷ cos(inclination)</span></div>
+    <div class="tscroll"><table><thead><tr><th class="l">Stage</th><th class="l">Anchor</th><th>Level</th><th>Horizontal<small>${u.Fm}</small></th><th>Horizontal<small>${u.F}/anchor</small></th><th>Axial<small>${u.F}/anchor</small></th><th>Axial<small>${u.Fm}</small></th></tr></thead><tbody>
+    ${rows.map(r => `<tr class="${gov[r.no] && gov[r.no].stage === r.stage ? 'gov' : ''}"><td class="l">${r.stage}</td><td class="l">A${r.no}</td><td>${el(r.s.elev)}</td><td>${fF(r.perM, 2)}</td><td>${fF(r.perStrut, 2)}</td><td>${fF(r.axial, 2)}</td><td>${fF(r.axialM, 2)}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="hint" style="margin:8px 0 0">Highlighted rows are the governing force for each anchor.</p>
+  </div>`;
+  el0.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => { S.tab = b.dataset.goto; render(); scrollTo({ top: 0 }); });
+  wireQuick(el0);
+}
+function elevationSVG(R, gov, name) {
+  const u = U();
+  const L = R.options.wallLength || 20, top = R.derived.wallTop, toe = R.wall.toe ?? top - 10;
+  const W = 300, ml = 34, mr = 10, mt = name ? 36 : 14, mb = 26;
+  const s = (W - ml - mr) / L; const H = (top - toe) * s + mt + mb;
+  const X = x => ml + x * s, Y = y => mt + (top - y) * s;
+  const o = [];
+  if (name) o.push(`<text x="${X(0)}" y="14" style="fill:var(--ink);font-size:13px;font-weight:700;font-family:var(--font-display);font-stretch:87%">${esc(name)}</text><text x="${X(0)}" y="27" style="fill:var(--ink-2);font-size:9.5px">Wall elevation, looking at the excavation face</text>`);
+  o.push(`<rect x="${X(0)}" y="${Y(top)}" width="${L * s}" height="${(top - toe) * s}" style="fill:var(--surface-2);stroke:var(--ink-2);stroke-width:1"/>`);
+  const last = R.derived.stageState[R.derived.stageState.length - 1];
+  if (last) o.push(`<line x1="${X(0)}" x2="${X(L)}" y1="${Y(last.glPassive)}" y2="${Y(last.glPassive)}" style="stroke:var(--ink);stroke-width:1.4"/><text x="${X(L) - 2}" y="${Y(last.glPassive) - 4}" text-anchor="end" style="fill:var(--ink-2);font-size:10px">Excavation ${el(last.glPassive)}</text>`);
+  for (const a of R.struts) {
+    const sp = a.spacing || 1; const n = Math.floor(L / sp);
+    const off = (L - (n - 1) * sp) / 2;
+    for (let i = 0; i < n; i++) o.push(`<circle cx="${X(off + i * sp)}" cy="${Y(a.elev)}" r="${Math.max(2, Math.min(5, sp * s * 0.28))}" style="fill:var(--anchor)"/>`);
+    const g = gov[a.no];
+    o.push(`<text x="${X(0) - 4}" y="${Y(a.elev) + 4}" text-anchor="end" style="fill:var(--anchor);font-size:10px;font-weight:600">A${a.no}</text>`);
+    o.push(`<text x="${X(L / 2)}" y="${Y(a.elev) - 14}" text-anchor="middle" style="fill:var(--ink);font-size:11px;font-family:var(--font-mono);paint-order:stroke;stroke:var(--surface-2);stroke-width:3px">${n} × @${sp.toFixed(2)} m${g ? ' · T ' + fF(g.axial) + ' ' + u.F : ''}</text>`);
+  }
+  o.push(`<text x="${X(0)}" y="${H - 8}" style="fill:var(--muted);font-size:10px">0</text><text x="${X(L)}" y="${H - 8}" text-anchor="end" style="fill:var(--muted);font-size:10px">${L} m</text>`);
+  o.push(`<text x="${X(0) - 4}" y="${Y(top) + 4}" text-anchor="end" style="fill:var(--muted);font-size:9.5px;font-family:var(--font-mono)">${top.toFixed(1)}</text><text x="${X(0) - 4}" y="${Y(toe)}" text-anchor="end" style="fill:var(--muted);font-size:9.5px;font-family:var(--font-mono)">${toe.toFixed(1)}</text>`);
+  return `<svg viewBox="0 0 ${W} ${H.toFixed(0)}" style="width:100%;max-width:440px;height:auto;display:block;margin:0 auto" role="img" aria-label="Wall elevation with anchor rows">${o.join('')}</svg><p class="hint" style="margin:8px 0 0">Wall length (${L} m) is the length used in the WALLAP model. The number of anchors is estimated from the spacing.</p>`;
+}
+
+// ---------- ANCHOR DESIGN
+const DZ = { strandBreak: 26.5, ratio: 0.6, factor: 1.0 };   // strandBreak in tonnes
+try { const g = JSON.parse(localStorage.getItem('wr-dz') || 'null'); if (g && g.strandBreak > 0) Object.assign(DZ, g); } catch (e) {}
+const dzRows = {};
+function dzKey(R) { return [R.meta.job, R.meta.runId, R.meta.title].join('|'); }
+function dzSave(R) { try { localStorage.setItem('wr-dz', JSON.stringify(DZ)); localStorage.setItem('wr-dz:' + dzKey(R), JSON.stringify(dzRows[dzKey(R)])); } catch (e) {} }
+function dzCalc(R, a, g, s, n) {
+  if (!g || !(s > 0)) return null;
+  const c = Math.cos((a.incl || 0) * Math.PI / 180);
+  const Hreq = g.perM * DZ.factor;                 // horizontal per m the row must carry
+  const Tm = Hreq / c;                              // along the anchor, per m
+  const Pa = DZ.strandBreak * DZ.ratio;             // allowable per strand
+  const T = Tm * s;                                 // force per anchor
+  const nMin = Math.max(1, Math.ceil(T / Pa - 1e-9));
+  const nn = n ?? nMin, cap = nn * Pa;
+  const s0 = a.spacing || 1, Lw = R.options.wallLength;
+  return { c, Hreq, Tm, Pa, T, nMin, n: nn, cap, util: T / cap, Hprov: cap * c / s, sMax: Math.floor(nn * Pa / Tm * 20 + 1e-9) / 20,
+    lock: a.prestress != null ? a.prestress / s0 * s : null, count: Lw ? Math.ceil(Lw / s - 1e-9) : null, stage: g.stage };
+}
+function dzGet(R) {
+  const key = dzKey(R);
+  if (!dzRows[key]) { let saved = null; try { saved = JSON.parse(localStorage.getItem('wr-dz:' + key) || 'null'); } catch (e) {} dzRows[key] = saved || {}; }
+  const rows = dzRows[key], gov = govAnchors(R);
+  for (const a of R.struts) if (!rows[a.no] || !(rows[a.no].s > 0) || !(rows[a.no].n >= 1)) { const s0 = a.spacing || 1; const c = dzCalc(R, a, gov[a.no], s0, null); rows[a.no] = { s: s0, n: c ? c.nMin : 2 }; }
+  return rows;
+}
+function dzMatrix(R, a, g, row) {
+  const u = U();
+  const base = [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3];
+  const sp = [...new Set([...base, a.spacing || 1, row.s].map(v => Math.round(v * 100) / 100))].sort((x, y) => x - y);
+  const lo = dzCalc(R, a, g, sp[0], null), hi = dzCalc(R, a, g, sp[sp.length - 1], null);
+  const n0 = Math.max(1, lo.nMin - 1), n1 = Math.min(30, Math.max(hi.nMin + 1, n0 + 5));
+  const ns = []; for (let n = n0; n <= n1; n++) ns.push(n);
+  let eco = null;
+  for (const s of sp) { const c = dzCalc(R, a, g, s, null); const r = c.nMin / s; if (c.nMin <= n1 && (!eco || r < eco.r - 1e-9 || (Math.abs(r - eco.r) < 1e-9 && s > eco.s))) eco = { s, n: c.nMin, r }; }
+  return `<table class="mx"><thead><tr><th class="l">Spacing<small>force / anchor</small></th>${ns.map(n => `<th>${n} strand${n > 1 ? 's' : ''}<small>${fF(n * lo.Pa, 1)} ${u.F}</small></th>`).join('')}</tr></thead><tbody>
+  ${sp.map(s => { const c = dzCalc(R, a, g, s, null); return `<tr><th class="l">${s.toFixed(2)} m<small>${fF(c.T, 1)} ${u.F}</small></th>${ns.map(n => {
+    const util = c.T / (n * c.Pa), ok = util <= 1 + 1e-9;
+    const cls = ['mx-cell', ok ? 'ok' : 'fail', n === c.nMin ? 'first' : '', Math.abs(s - row.s) < 1e-6 && n === row.n ? 'sel' : ''].join(' ');
+    const star = eco && Math.abs(eco.s - s) < 1e-6 && eco.n === n ? '★ ' : '';
+    return `<td><button type="button" class="${cls}" data-mx="${a.no}" data-s="${s}" data-n="${n}" aria-label="${s.toFixed(2)} m spacing, ${n} strands, ${Math.round(util * 100)}% used">${star}${ok ? '' : ''}${Math.round(util * 100)}%</button></td>`; }).join('')}</tr>`; }).join('')}
+  </tbody></table>
+  <div class="legend" style="margin-top:8px"><span><span class="swatch mx-sw ok"></span>Carries the consultant's force</span><span><span class="swatch mx-sw fail"></span>Not enough</span><span><b>Bold</b> = fewest strands at that spacing</span><span>★ fewest strands per metre of wall</span><span>Outlined = your choice. Click a cell to choose it.</span></div>`;
+}
+function renderDesign(el0) {
+  const R = S.R, u = U();
+  if (!R.struts.length) { el0.innerHTML = `<div class="panel"><h2>Anchor design</h2><p class="hint">This wall has no struts or anchors in the report.</p></div>`; return; }
+  const rows = dzGet(R), gov = govAnchors(R);
+  el0.innerHTML = `
+  <div class="panel">
+    <div class="panel-head"><h2>Anchor design · ${esc(sectionName(R))}</h2><span class="hint">Choose spacing and strands for each row. The row has to carry at least the force per metre from the consultant's report.</span></div>
+    <div class="dz-globals">
+      <label for="dz-break"><span>Breaking load per strand <span class="u">${u.F}</span></span><input id="dz-break" type="number" step="0.1" min="1" value="${(DZ.strandBreak * u.f).toFixed(1)}"></label>
+      <label for="dz-ratio"><span>Allowable ratio <span class="u">× breaking</span></span><input id="dz-ratio" type="number" step="0.01" min="0.1" max="1" value="${DZ.ratio.toFixed(2)}"></label>
+      <div class="dz-derived"><span>Allowable per strand</span><b id="dz-pa"></b></div>
+      <label for="dz-factor"><span>Factor on consultant force</span><input id="dz-factor" type="number" step="0.05" min="0.5" max="3" value="${DZ.factor.toFixed(2)}"></label>
+    </div>
+    <p class="hint" style="margin:10px 0 0">Defaults are a 0.6" strand (Ø15.2 mm, 140 mm², 1860 MPa, breaking load 26.5 t) used at 0.60 of breaking load. Set them to your project specification.</p>
+  </div>
+  ${R.struts.map(a => { const g = gov[a.no], r = rows[a.no]; return `
+  <div class="panel dcard">
+    <div class="panel-head"><h2>Row A${a.no} · ${el(a.elev)}</h2><span class="hint">Inclination ${fx(a.incl, 1)}° · consultant modelled ${fx(a.spacing, 2)} m spacing</span></div>
+    ${g ? `<div class="dz-grid">
+      <div class="dz-req"><div class="k-label">Required by the consultant</div><div class="big" id="dreq-${a.no}"></div><div class="hint" id="dreqs-${a.no}"></div></div>
+      <div class="dz-in">
+        <label for="ds-${a.no}">Spacing <span class="u">m</span></label>
+        <div class="inrow"><button type="button" data-step="s" data-d="-0.05" data-no="${a.no}" aria-label="Decrease spacing">−</button><input id="ds-${a.no}" type="number" step="0.05" min="0.3" max="6" value="${r.s.toFixed(2)}"><button type="button" data-step="s" data-d="0.05" data-no="${a.no}" aria-label="Increase spacing">+</button></div>
+        <input id="dsr-${a.no}" type="range" min="0.5" max="4" step="0.05" value="${r.s}" aria-label="Spacing">
+        <label for="dn-${a.no}" style="margin-top:6px">Strands per anchor</label>
+        <div class="inrow"><button type="button" data-step="n" data-d="-1" data-no="${a.no}" aria-label="Fewer strands">−</button><input id="dn-${a.no}" type="number" step="1" min="1" max="30" value="${r.n}"><button type="button" data-step="n" data-d="1" data-no="${a.no}" aria-label="More strands">+</button><button type="button" class="link" data-min="${a.no}">Use minimum</button></div>
+      </div>
+      <div class="dz-out" id="dout-${a.no}"></div>
+    </div>
+    <h3 style="margin:18px 0 8px">Options: share of anchor capacity used</h3>
+    <div class="tscroll" id="dmx-${a.no}"></div>` : `<p class="hint">The report has no force for this anchor, so there is nothing to design against.</p>`}
+  </div>`; }).join('')}
+  <div class="panel"><div class="panel-head"><h2>Selected anchors</h2><span class="hint">Your choices for ${esc(sectionName(R))}</span></div><div class="tscroll" id="dsum"></div></div>`;
+
+  const q = id => el0.querySelector('#' + id);
+  const update = () => {
+    const uu = U();
+    q('dz-pa').textContent = `${fF(DZ.strandBreak * DZ.ratio, 2)} ${uu.F}`;
+    const sum = [];
+    for (const a of R.struts) {
+      const g = gov[a.no]; if (!g) continue;
+      const r = rows[a.no], c = dzCalc(R, a, g, r.s, r.n);
+      q('dreq-' + a.no).innerHTML = `${fF(c.Hreq, 2)}<span>${uu.Fm} horizontal</span>`;
+      q('dreqs-' + a.no).innerHTML = `${fF(c.Tm, 2)} ${uu.Fm} along the anchor · governing stage ${g.stage}${DZ.factor !== 1 ? ` · includes ×${DZ.factor.toFixed(2)}` : ''}`;
+      const ok = c.util <= 1 + 1e-9;
+      q('dout-' + a.no).innerHTML = `
+        <div class="verdict ${ok ? 'good' : 'crit'}">${ok ? '✓ Carries the consultant’s force' : '✗ Not enough capacity'}</div>
+        <div class="meter${ok ? '' : ' over'}" role="img" aria-label="${Math.round(c.util * 100)}% of capacity used"><i style="width:${Math.min(100, c.util * 100).toFixed(1)}%"></i></div>
+        <div class="keys">
+          <div><span>Force per anchor</span><b>${fF(c.T, 2)} ${uu.F}</b></div>
+          <div><span>Anchor capacity (${c.n} × ${fF(c.Pa, 2)})</span><b>${fF(c.cap, 2)} ${uu.F}</b></div>
+          <div><span>Capacity used</span><b>${Math.round(c.util * 100)}%</b></div>
+          <div><span>Provided per m, horizontal</span><b class="${ok ? '' : 'bad'}">${fF(c.Hprov, 2)} ${ok ? '≥' : '<'} ${fF(c.Hreq, 2)} ${uu.Fm}</b></div>
+          <div><span>Fewest strands at ${r.s.toFixed(2)} m</span><b>${c.nMin}</b></div>
+          <div><span>Widest spacing with ${c.n} strands</span><b>${c.sMax.toFixed(2)} m</b></div>
+          ${c.lock != null ? `<div><span>Lock-off load (consultant prestress)</span><b>${fF(c.lock, 1)} ${uu.F} · ${Math.round(c.lock / c.cap * 100)}%</b></div>` : ''}
+          ${c.count != null ? `<div><span>Anchors along ${R.options.wallLength} m of wall</span><b>≈ ${c.count}</b></div>` : ''}
+        </div>`;
+      q('dmx-' + a.no).innerHTML = dzMatrix(R, a, g, r);
+      sum.push(`<tr><td class="l">A${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.incl, 0)}°</td><td>${r.s.toFixed(2)}</td><td>${c.n}</td><td>${fF(c.T, 2)}</td><td>${fF(c.cap, 2)}</td><td>${Math.round(c.util * 100)}%</td><td>${fF(c.Hprov, 2)}</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${ok ? '<span class="chip good">✓ OK</span>' : '<span class="chip crit">✗ Increase</span>'}</td></tr>`);
+    }
+    q('dsum').innerHTML = `<table><thead><tr><th class="l">Row</th><th>Level</th><th>Incl.</th><th>Spacing<small>m</small></th><th>Strands</th><th>Force<small>${uu.F}/anchor</small></th><th>Capacity<small>${uu.F}/anchor</small></th><th>Used</th><th>Provided H<small>${uu.Fm}</small></th><th>Required H<small>${uu.Fm}</small></th><th>Anchors<small>per ${R.options.wallLength ?? '–'} m</small></th><th class="l">Status</th></tr></thead><tbody>${sum.join('')}</tbody></table>`;
+    dzSave(R);
+  };
+  const setS = (no, v, from) => { if (!(v >= 0.3 && v <= 10)) return; rows[no].s = Math.round(v * 100) / 100; if (from !== 'num') q('ds-' + no).value = rows[no].s.toFixed(2); if (from !== 'range') q('dsr-' + no).value = rows[no].s; update(); };
+  const setN = (no, v, from) => { v = Math.round(v); if (!(v >= 1 && v <= 30)) return; rows[no].n = v; if (from !== 'num') q('dn-' + no).value = v; update(); };
+  for (const a of R.struts) {
+    if (!gov[a.no]) continue;
+    q('ds-' + a.no).addEventListener('input', e => setS(a.no, parseFloat(e.target.value), 'num'));
+    q('dsr-' + a.no).addEventListener('input', e => setS(a.no, parseFloat(e.target.value), 'range'));
+    q('dn-' + a.no).addEventListener('input', e => setN(a.no, parseFloat(e.target.value), 'num'));
+  }
+  el0.querySelectorAll('[data-step]').forEach(b => b.onclick = () => { const no = +b.dataset.no, d = +b.dataset.d; if (b.dataset.step === 's') setS(no, rows[no].s + d); else setN(no, rows[no].n + d); });
+  el0.querySelectorAll('[data-min]').forEach(b => b.onclick = () => { const no = +b.dataset.min; const a = R.struts.find(x => x.no === no); setN(no, dzCalc(R, a, gov[no], rows[no].s, null).nMin); });
+  el0.addEventListener('click', e => { const b = e.target.closest('[data-mx]'); if (!b) return; const no = +b.dataset.mx; rows[no].s = +b.dataset.s; q('ds-' + no).value = rows[no].s.toFixed(2); q('dsr-' + no).value = rows[no].s; setN(no, +b.dataset.n); });
+  const g = (id, fn) => q(id).addEventListener('input', e => { const v = parseFloat(e.target.value); if (v > 0) { fn(v); update(); } });
+  g('dz-break', v => { DZ.strandBreak = v / U().f; });
+  g('dz-ratio', v => { if (v <= 1) DZ.ratio = v; });
+  g('dz-factor', v => { DZ.factor = v; });
+  update();
+}
+
+// ---------- EXPORT AT 1:100 (DXF / PDF)
+// Model space: metres, x = 0 on the wall line (negative = retained side), y = real elevation.
+const EXP_KINDS = [
+  { k: 'anchors', label: 'Section and anchors', short: 'anchors' },
+  { k: 'M', label: 'Bending moment', short: 'moment' },
+  { k: 'V', label: 'Shear force', short: 'shear' },
+  { k: 'D', label: 'Displacement', short: 'displacement' },
+];
+const EXP_LAYERS = {
+  'WLP-WALL': 7, 'WLP-GROUND': 8, 'WLP-WATER': 5, 'WLP-ANCHOR': 30, 'WLP-LEVEL': 7, 'WLP-TEXT': 7, 'WLP-DIM': 8,
+  'WLP-MAX': 5, 'WLP-MIN': 1, 'WLP-ORD-MAX': 151, 'WLP-ORD-MIN': 11, 'WLP-SCALE': 8,
+};
+const EXP_INK = { 'WLP-WALL': '#111111', 'WLP-GROUND': '#555555', 'WLP-WATER': '#1f5fbf', 'WLP-ANCHOR': '#d2551f', 'WLP-LEVEL': '#111111', 'WLP-TEXT': '#111111', 'WLP-DIM': '#555555', 'WLP-MAX': '#1f5fbf', 'WLP-MIN': '#c8372d', 'WLP-ORD-MAX': '#9db8e3', 'WLP-ORD-MIN': '#e8a9a3', 'WLP-SCALE': '#333333' };
+const EXP_W = { 'WLP-WALL': 0.6, 'WLP-MAX': 0.35, 'WLP-MIN': 0.35, 'WLP-ANCHOR': 0.35, 'WLP-ORD-MAX': 0.13, 'WLP-ORD-MIN': 0.13, 'WLP-GROUND': 0.25, 'WLP-WATER': 0.18, 'WLP-DIM': 0.13, 'WLP-SCALE': 0.18, 'WLP-LEVEL': 0.18 };
+function niceUp(v) { const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return ([1, 2, 2.5, 4, 5, 10].find(x => n <= x + 1e-9)) * p; }
+function asciiUnit(s) { return s.replace('·', '.').replace('²', '2').replace('³', '3'); }
+function expPeaks(curves, maxAbs) {
+  const cand = [];
+  curves.forEach((c, ci) => {
+    const p = c.pts, A = p.map(q => Math.abs(q.v)); let best = null;
+    A.forEach((a, i) => { if (!best || a > best.a) best = { ...p[i], a, ci, main: true }; });
+    if (best && best.a > maxAbs * 0.01) cand.push(best);
+    A.forEach((a, i) => {
+      if (a < 0.15 * maxAbs || (best && p[i].y === best.y)) return;
+      if ((i > 0 && A[i - 1] > a) || (i < A.length - 1 && A[i + 1] > a)) return;
+      let mL = a, mR = a, j;
+      for (j = i - 1; j >= 0 && A[j] <= a; j--) mL = Math.min(mL, A[j]); if (j < 0) mL = Math.min(mL, 0);
+      for (j = i + 1; j < A.length && A[j] <= a; j++) mR = Math.min(mR, A[j]); if (j >= A.length) mR = Math.min(mR, 0);
+      if (a - Math.max(mL, mR) >= 0.1 * maxAbs) cand.push({ ...p[i], a, ci, main: false });
+    });
+  });
+  return cand.sort((a, b) => (!!b.main - !!a.main) || (b.a - a.a));
+}
+function exportModel(R, kind) {
+  const u = U(), f = u.f;
+  const lastNo = R.stages.length ? R.stages[R.stages.length - 1].no : null;
+  const st = R.derived.stageState.find(s => s.stage === lastNo) || R.derived.stageState[R.derived.stageState.length - 1] || { glActive: R.derived.groundTop, glPassive: R.derived.groundTop, struts: R.struts.map(a => a.no), waterActive: R.water.active };
+  const top = R.derived.wallTop, toe = R.wall.toe ?? top - 10, name = sectionName(R);
+  const H = 0.25, Hs = 0.2, Ht = 0.45;
+  const items = [];
+  const line = (layer, pts) => items.push({ t: 'line', layer, pts });
+  const text = (layer, x, y, s, h = H, align = 'left', rot = 0) => items.push({ t: 'text', layer, x, y, s: String(s), h, align, rot });
+  const env = envelope(R);
+  const F = asciiUnit(u.F), Fm = asciiUnit(u.Fm), Mu = asciiUnit(u.M);
+  let diag = null, xmin, xmax, unitTxt = '', title = '', summary = '';
+  const gov = govAnchors(R);
+  if (kind !== 'anchors') {
+    const P = (k, m) => env.map(e => ({ y: e.y, v: e[k] * m })).filter(p => p.y >= toe - 1e-6 && p.y <= top + 1e-6);
+    const K = keyNumbers(R);
+    if (kind === 'M') { diag = { dir: -1, unit: Mu, dec: 1, curves: [{ pts: P('MMax', f), layer: 'WLP-MAX', name: 'max' }, { pts: P('MMin', f), layer: 'WLP-MIN', name: 'min' }] }; title = 'Bending moment, envelope of all stages'; summary = K.Mpos ? `max ${fx(K.Mpos.v * f, 1)} at ${el(K.Mpos.y)}, min ${fx(K.Mneg.v * f, 1)} at ${el(K.Mneg.y)} ${Mu}` : ''; }
+    if (kind === 'V') { diag = { dir: 1, unit: Fm, dec: 1, curves: [{ pts: P('VMax', f), layer: 'WLP-MAX', name: 'max' }, { pts: P('VMin', f), layer: 'WLP-MIN', name: 'min' }] }; title = 'Shear force, envelope of all stages'; summary = K.V ? `max |V| ${fx(Math.abs(K.V.v) * f, 1)} ${Fm} at ${el(K.V.y)}` : ''; }
+    if (kind === 'D') { const c = [{ pts: P('dMax', 1000), layer: 'WLP-MAX', name: 'max' }]; if (env.some(e => Math.abs(e.dMin) > 0.0005)) c.push({ pts: P('dMin', 1000), layer: 'WLP-MIN', name: 'min' }); diag = { dir: 1, unit: 'mm', dec: 0, curves: c }; title = 'Displacement, envelope of all stages'; summary = K.D ? `max ${mm(K.D.v)} mm at ${el(K.D.y)}` : ''; }
+    const maxAbs = Math.max(1e-9, ...diag.curves.flatMap(c => c.pts.map(p => Math.abs(p.v))));
+    diag.per = niceUp(maxAbs / 3.5);               // value per metre of drawing (= per cm at 1:100)
+    const xs = diag.curves.flatMap(c => c.pts.map(p => diag.dir * p.v / diag.per));
+    xmin = Math.min(-2.5, Math.min(...xs) - 2.2); xmax = Math.max(2.5, Math.max(...xs) + 2.2);
+    unitTxt = `Diagram scale 1 cm = ${+diag.per.toPrecision(6)} ${diag.unit} (1 m in model)`;
+  } else {
+    const reach = Math.max(2, ...R.struts.map(a => (a.freeLength || 6) * 1.35 * Math.cos((a.incl || 0) * Math.PI / 180)));
+    xmin = -(reach + 1.2); xmax = 4.5;
+    title = 'Section and anchors, final stage' + (lastNo != null ? ' ' + lastNo : '');
+    summary = R.struts.map(a => gov[a.no] ? `A${a.no}: T ${fx(gov[a.no].axial * f, 1)} ${F}/anchor, H ${fx(gov[a.no].perM * f, 2)} ${Fm}` : `A${a.no}`).join('; ');
+  }
+  // wall, ground, water
+  line('WLP-WALL', [[0, top], [0, toe]]);
+  const ground = (x0, x1, y) => { line('WLP-GROUND', [[x0, y], [x1, y]]); for (let x = x0 + 0.25; x < x1 - 0.1; x += 0.5) line('WLP-GROUND', [[x, y], [x - 0.18, y - 0.18]]); };
+  ground(xmin, 0, st.glActive); ground(0, xmax, st.glPassive);
+  let ybot = toe;
+  const w = st.waterActive;
+  if (w != null && w <= top && w >= toe - 3) {
+    for (let x = xmin; x < xmax; x += 0.8) line('WLP-WATER', [[x, w], [Math.min(x + 0.5, xmax), w]]);
+    line('WLP-WATER', [[xmin + 1, w + 0.08], [xmin + 1.3, w + 0.35], [xmin + 0.7, w + 0.35], [xmin + 1, w + 0.08]]);
+    text('WLP-WATER', xmin + 1.45, w + 0.1, 'W.T.', Hs);
+    ybot = Math.min(ybot, w);
+  }
+  // anchors
+  for (const a of R.struts) {
+    if (!st.struts.includes(a.no)) continue;
+    const ang = (a.incl || 0) * Math.PI / 180, ca = Math.cos(ang), sa = Math.sin(ang);
+    if (kind === 'anchors') {
+      const L = a.freeLength || 6, Lb = Math.min(0.35 * L, (-xmin - L * ca - 0.3) / ca);
+      line('WLP-ANCHOR', [[0, a.elev], [-L * ca, a.elev - L * sa]]);
+      const bx = -(L + Lb) * ca, by = a.elev - (L + Lb) * sa, px = -sa * 0.12, py = ca * 0.12, fx0 = -L * ca, fy0 = a.elev - L * sa;
+      line('WLP-ANCHOR', [[fx0 + px, fy0 + py], [bx + px, by + py], [bx - px, by - py], [fx0 - px, fy0 - py], [fx0 + px, fy0 + py]]);
+      line('WLP-ANCHOR', [[0.12, a.elev + 0.3], [0.12, a.elev - 0.3]]);
+      const mx = -L * 0.5 * ca, my = a.elev - L * 0.5 * sa, deg = a.incl || 0;
+      const g = gov[a.no];
+      const off = (d) => [mx - sa * d, my + ca * d];
+      const [x1, y1] = off(0.18), [x2, y2] = off(-0.18 - H), [x3, y3] = off(-0.3 - H - Hs - 0.12);
+      text('WLP-ANCHOR', x1, y1, `A${a.no}  T = ${g ? fx(g.axial * f, 1) : '-'} ${F}/anchor`, 0.3, 'center', deg);
+      if (g) text('WLP-TEXT', x2, y2, `H = ${fx(g.perM * f, 2)} ${Fm} (stage ${g.stage})`, H, 'center', deg);
+      text('WLP-TEXT', x3, y3, `L free ${fx(a.freeLength, 2)} m, ${fx(deg, 0)}°, @ ${fx(a.spacing, 2)} m, prestress ${fx(a.prestress * f, 1)} ${F}`, Hs, 'center', deg);
+    } else {
+      line('WLP-ANCHOR', [[0, a.elev], [-0.7 * ca, a.elev - 0.7 * sa]]);
+    }
+  }
+  // dimensions (anchors sheet)
+  if (kind === 'anchors') {
+    const dx = 1.6;
+    const dim = (ya, yb) => { if (Math.abs(ya - yb) < 0.2) return; line('WLP-DIM', [[dx, ya], [dx, yb]]); for (const y of [ya, yb]) line('WLP-DIM', [[dx - 0.15, y - 0.15], [dx + 0.15, y + 0.15]]); text('WLP-DIM', dx - 0.12, (ya + yb) / 2, `${(ya - yb).toFixed(2)}`, H, 'center', 90); };
+    dim(top, st.glPassive); dim(st.glPassive, toe);
+  }
+  // diagram
+  if (diag) {
+    for (const c of diag.curves) {
+      if (!c.pts.length || c.pts.every(p => Math.abs(p.v) < 1e-9)) continue;
+      const X = v => diag.dir * v / diag.per;
+      line(c.layer, [[0, c.pts[0].y], ...c.pts.map(p => [X(p.v), p.y]), [0, c.pts[c.pts.length - 1].y]]);
+      const ordL = c.layer === 'WLP-MAX' ? 'WLP-ORD-MAX' : 'WLP-ORD-MIN';
+      for (const p of c.pts) if (Math.abs(X(p.v)) > 0.05) line(ordL, [[0, p.y], [X(p.v), p.y]]);
+    }
+    const maxAbs = Math.max(1e-9, ...diag.curves.flatMap(c => c.pts.map(p => Math.abs(p.v))));
+    const placed = [];
+    for (const c of expPeaks(diag.curves, maxAbs)) {
+      const x = diag.dir * c.v / diag.per, side = Math.sign(x) || 1;
+      if (placed.some(q => q.side === side && Math.abs(q.y - c.y) < (q.main || c.main ? 0.75 : 0.45))) continue;
+      placed.push({ side, y: c.y, main: c.main });
+      const al = side > 0 ? 'left' : 'right', tx = x + side * 0.18;
+      text('WLP-TEXT', tx, c.y - (c.main ? 0.02 : 0.12), fx(c.v, diag.dec), c.main ? 0.3 : H, al);
+      if (c.main) text('WLP-TEXT', tx, c.y - 0.34, '@ ' + el(c.y), Hs, al);
+      line(diag.curves[c.ci].layer, [[x - 0.08, c.y], [x + 0.08, c.y]]);
+    }
+  }
+  // level marks on the right
+  const levels = [{ y: top, t: 'top of wall' }];
+  if (Math.abs(st.glActive - top) > 0.01) levels.push({ y: st.glActive, t: 'ground' });
+  if (st.glPassive < top - 0.01) levels.push({ y: st.glPassive, t: 'excavation' });
+  for (const a of R.struts) if (st.struts.includes(a.no)) levels.push({ y: a.elev, t: 'anchor A' + a.no });
+  levels.push({ y: toe, t: 'toe' });
+  if (w != null && w >= toe - 3 && w <= top) levels.push({ y: w, t: 'water table' });
+  levels.sort((a, b) => b.y - a.y);
+  let last = 1e9;
+  for (const l of levels) {
+    const ty = Math.min(l.y, last - 0.62); last = ty;
+    line('WLP-LEVEL', [[xmax, l.y], [xmax + 0.35, l.y], [xmax + 0.55, ty]]);
+    line('WLP-LEVEL', [[xmax + 0.35, l.y], [xmax + 0.22, l.y + 0.18], [xmax + 0.48, l.y + 0.18], [xmax + 0.35, l.y]]);
+    text('WLP-LEVEL', xmax + 0.65, ty - 0.1, el(l.y), H);
+    text('WLP-TEXT', xmax + 0.65, ty - 0.38, l.t, 0.16);
+  }
+  // scale bars and title block below the drawing
+  let yb = ybot - 1.0;
+  line('WLP-SCALE', [[xmin, yb], [xmin + 5, yb]]);
+  for (let i = 0; i <= 5; i++) line('WLP-SCALE', [[xmin + i, yb], [xmin + i, yb + (i % 5 ? 0.12 : 0.22)]]);
+  text('WLP-SCALE', xmin + 5.2, yb - 0.08, '5 m  (50 mm at 1:100)', Hs);
+  if (diag) {
+    yb -= 0.75;
+    line('WLP-SCALE', [[xmin, yb], [xmin + 2, yb]]); for (let i = 0; i <= 2; i++) line('WLP-SCALE', [[xmin + i, yb], [xmin + i, yb + 0.15]]);
+    text('WLP-SCALE', xmin + 2.2, yb - 0.08, `${+(2 * diag.per).toPrecision(6)} ${diag.unit}   (${unitTxt})`, Hs);
+  }
+  yb -= 1.0;
+  text('WLP-TEXT', xmin, yb, `${name} - ${title}`, Ht);
+  text('WLP-TEXT', xmin, yb - 0.55, `Scale 1:100${R.meta.job ? ' | Job ' + R.meta.job : ''}${summary ? ' | ' + summary : ''}`, H);
+  text('WLP-TEXT', xmin, yb - 0.95, `From WALLAP report ${R.meta.runId || ''}. x = 0 at wall, y = elevation (m).${kind === 'M' ? ' +M drawn on the retained side, as in WALLAP.' : ''}`, Hs);
+  // bounds
+  const bb = { xmin: 1e9, xmax: -1e9, ymin: 1e9, ymax: -1e9 };
+  const add = (x, y) => { bb.xmin = Math.min(bb.xmin, x); bb.xmax = Math.max(bb.xmax, x); bb.ymin = Math.min(bb.ymin, y); bb.ymax = Math.max(bb.ymax, y); };
+  for (const it of items) {
+    if (it.t === 'line') it.pts.forEach(p => add(p[0], p[1]));
+    else { const wdt = textWidth(it.s) * it.h / 0.718, c = Math.cos(it.rot * Math.PI / 180), s = Math.sin(it.rot * Math.PI / 180); const x0 = it.align === 'center' ? -wdt / 2 : it.align === 'right' ? -wdt : 0; for (const [dx, dy] of [[x0, -0.3 * it.h], [x0 + wdt, -0.3 * it.h], [x0, it.h * 1.1], [x0 + wdt, it.h * 1.1]]) add(it.x + dx * c - dy * s, it.y + dx * s + dy * c); }
+  }
+  return { kind, name, title, items, bb, diag };
+}
+// Helvetica advance widths (per 1000 em) for text extents and PDF alignment
+const HELV = (() => { const w = {}; const set = (chars, v) => { for (const ch of chars) w[ch] = v; };
+  set(' !\',./:;I[\\]fijlt|', 278); set('0123456789#$?_abdeghnopqu', 556); set('"', 355); set('%', 889); set('&ABEKPSVXY', 667); set('()-r`{}', 333); set('*', 389); set('+<=>~', 584); set('@', 1015);
+  set('CDHNRUw', 722); set('FTZ', 611); set('GOQ', 778); set('J', 500); set('L', 556); set('M', 833); set('W', 944); set('^', 469); set('ckssvxyz', 500); set('m', 833); set('°', 400); set('·', 278); set('ijl', 222);
+  return w; })();
+function textWidth(s) { let t = 0; for (const ch of s) t += HELV[ch] ?? 556; return t / 1000; } // in em
+
+// ---- DXF (R12 ASCII)
+function toDXF(models, k) {
+  const out = [];
+  const g = (code, v) => { out.push(String(code)); out.push(String(v)); };
+  const n = v => (Math.round(v * k * 10000) / 10000).toString();
+  const placed = []; let ox = 0;
+  models.forEach((m, i) => { if (i) ox += models[i - 1].bb.xmax - m.bb.xmin + 4; placed.push({ m, ox }); });
+  const all = { xmin: 1e9, xmax: -1e9, ymin: 1e9, ymax: -1e9 };
+  for (const p of placed) { all.xmin = Math.min(all.xmin, p.m.bb.xmin + p.ox); all.xmax = Math.max(all.xmax, p.m.bb.xmax + p.ox); all.ymin = Math.min(all.ymin, p.m.bb.ymin); all.ymax = Math.max(all.ymax, p.m.bb.ymax); }
+  g(0, 'SECTION'); g(2, 'HEADER'); g(9, '$ACADVER'); g(1, 'AC1009');
+  g(9, '$INSBASE'); g(10, 0); g(20, 0); g(30, 0);
+  g(9, '$EXTMIN'); g(10, n(all.xmin)); g(20, n(all.ymin)); g(30, 0);
+  g(9, '$EXTMAX'); g(10, n(all.xmax)); g(20, n(all.ymax)); g(30, 0);
+  g(0, 'ENDSEC');
+  g(0, 'SECTION'); g(2, 'TABLES');
+  g(0, 'TABLE'); g(2, 'LTYPE'); g(70, 1); g(0, 'LTYPE'); g(2, 'CONTINUOUS'); g(70, 0); g(3, 'Solid line'); g(72, 65); g(73, 0); g(40, 0.0); g(0, 'ENDTAB');
+  const layers = Object.keys(EXP_LAYERS);
+  g(0, 'TABLE'); g(2, 'LAYER'); g(70, layers.length + 1);
+  g(0, 'LAYER'); g(2, '0'); g(70, 0); g(62, 7); g(6, 'CONTINUOUS');
+  for (const L of layers) { g(0, 'LAYER'); g(2, L); g(70, 0); g(62, EXP_LAYERS[L]); g(6, 'CONTINUOUS'); }
+  g(0, 'ENDTAB');
+  g(0, 'TABLE'); g(2, 'STYLE'); g(70, 1); g(0, 'STYLE'); g(2, 'STANDARD'); g(70, 0); g(40, 0.0); g(41, 1.0); g(50, 0.0); g(71, 0); g(42, 0.25); g(3, 'txt'); g(4, ''); g(0, 'ENDTAB');
+  g(0, 'ENDSEC');
+  g(0, 'SECTION'); g(2, 'ENTITIES');
+  const dxfText = s => s.replace(/°/g, '%%d').replace(/·/g, '.').replace(/[^\x20-\x7e%]/g, '-');
+  for (const { m, ox } of placed) for (const it of m.items) {
+    if (it.t === 'line') {
+      if (it.pts.length === 2) { g(0, 'LINE'); g(8, it.layer); g(10, n(it.pts[0][0] + ox)); g(20, n(it.pts[0][1])); g(30, 0); g(11, n(it.pts[1][0] + ox)); g(21, n(it.pts[1][1])); g(31, 0); }
+      else { g(0, 'POLYLINE'); g(8, it.layer); g(66, 1); g(10, 0); g(20, 0); g(30, 0); g(70, 0); for (const p of it.pts) { g(0, 'VERTEX'); g(8, it.layer); g(10, n(p[0] + ox)); g(20, n(p[1])); g(30, 0); } g(0, 'SEQEND'); g(8, it.layer); }
+    } else {
+      g(0, 'TEXT'); g(8, it.layer); g(10, n(it.x + ox)); g(20, n(it.y)); g(30, 0); g(40, n(it.h)); g(1, dxfText(it.s));
+      if (it.rot) g(50, it.rot);
+      g(7, 'STANDARD');
+      if (it.align !== 'left') { g(72, it.align === 'center' ? 1 : 2); g(11, n(it.x + ox)); g(21, n(it.y)); g(31, 0); }
+    }
+  }
+  g(0, 'ENDSEC'); g(0, 'EOF');
+  return out.join('\r\n') + '\r\n';
+}
+
+// ---- PDF (vector, one page per drawing, true 1:100)
+function toPDF(models) {
+  const MM = 72 / 25.4, SC = 10; // 1 m model = 10 mm paper at 1:100
+  const sheets = [['A4', 210, 297], ['A3', 297, 420], ['A2', 420, 594], ['A1', 594, 841], ['A0', 841, 1189]];
+  const enc = s => { let o = ''; for (const ch of s) { const c = ch === '·' ? 0xB7 : ch === '°' ? 0xB0 : ch === '²' ? 0xB2 : ch.charCodeAt(0); if (c === 40 || c === 41 || c === 92) o += '\\' + ch; else if (c >= 32 && c < 127) o += ch; else if (c < 256) o += '\\' + c.toString(8).padStart(3, '0'); else o += '-'; } return o; };
+  const hex = h => [1, 3, 5].map(i => (parseInt(h.substr(i, 2), 16) / 255).toFixed(3)).join(' ');
+  const pages = [];
+  for (const m of models) {
+    const wmm = (m.bb.xmax - m.bb.xmin) * SC, hmm = (m.bb.ymax - m.bb.ymin) * SC, margin = 12;
+    let pw, ph, label = 'custom';
+    for (const [nm, a, b] of sheets) { if (wmm + 2 * margin <= a && hmm + 2 * margin + 8 <= b) { pw = a; ph = b; label = nm + ' portrait'; break; } if (wmm + 2 * margin <= b && hmm + 2 * margin + 8 <= a) { pw = b; ph = a; label = nm + ' landscape'; break; } }
+    if (!pw) { pw = Math.ceil(wmm + 2 * margin); ph = Math.ceil(hmm + 2 * margin + 8); }
+    const ox = (pw - wmm) / 2 - m.bb.xmin * SC, oy = (ph - hmm) / 2 + 4 - m.bb.ymin * SC;
+    const P = (x, y) => `${((x * SC + ox) * MM).toFixed(2)} ${((y * SC + oy) * MM).toFixed(2)}`;
+    const c = ['1 J 1 j'];
+    for (const it of m.items) if (it.t === 'line') {
+      c.push(`${hex(EXP_INK[it.layer] || '#111111')} RG ${((EXP_W[it.layer] || 0.18) * MM).toFixed(2)} w`);
+      c.push(it.pts.map((p, i) => P(p[0], p[1]) + (i ? ' l' : ' m')).join(' ') + ' S');
+    }
+    for (const it of m.items) if (it.t === 'text') {
+      const fs = it.h * SC / 0.718 * MM, wd = textWidth(it.s) * fs;
+      const a = it.rot * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+      const off = it.align === 'center' ? -wd / 2 : it.align === 'right' ? -wd : 0;
+      const bx = (it.x * SC + ox) * MM + off * ca, by = (it.y * SC + oy) * MM + off * sa;
+      c.push(`${hex(EXP_INK[it.layer] || '#111111')} rg BT /F1 ${fs.toFixed(2)} Tf ${ca.toFixed(4)} ${sa.toFixed(4)} ${(-sa).toFixed(4)} ${ca.toFixed(4)} ${bx.toFixed(2)} ${by.toFixed(2)} Tm (${enc(it.s)}) Tj ET`);
+    }
+    const note = `Scale 1:100 on ${label} (${Math.round(pw)} x ${Math.round(ph)} mm). Print at actual size (100%); the 5 m bar must measure 50 mm.`;
+    c.push(`0.4 0.4 0.4 rg BT /F1 ${(6.5).toFixed(2)} Tf 1 0 0 1 ${(margin * MM).toFixed(2)} ${(6 * MM).toFixed(2)} Tm (${enc(note)}) Tj ET`);
+    pages.push({ w: pw * MM, h: ph * MM, content: c.join('\n') });
+  }
+  const objs = [];
+  objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+  const kids = [];
+  pages.forEach((p, i) => {
+    const pid = 4 + i * 2, cid = pid + 1; kids.push(`${pid} 0 R`);
+    objs[pid] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${p.w.toFixed(2)} ${p.h.toFixed(2)}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${cid} 0 R >>`;
+    objs[cid] = `<< /Length ${p.content.length} >>\nstream\n${p.content}\nendstream`;
+  });
+  objs[2] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages.length} >>`;
+  let pdf = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'; const offs = [];
+  for (let i = 1; i < objs.length; i++) { offs[i] = pdf.length; pdf += `${i} 0 obj\n${objs[i]}\nendobj\n`; }
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objs.length}\n0000000000 65535 f \n` + offs.slice(1).map(o => String(o).padStart(10, '0') + ' 00000 n \n').join('');
+  pdf += `trailer\n<< /Size ${objs.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const bytes = new Uint8Array(pdf.length); for (let i = 0; i < pdf.length; i++) bytes[i] = pdf.charCodeAt(i) & 255;
+  return bytes;
+}
+
+// ---- ZIP (stored, no compression)
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function toZip(files) {
+  const te = new TextEncoder(), parts = [], central = []; let off = 0;
+  const d = new Date(), dt = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF, dd = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
+  for (const f of files) {
+    const name = te.encode(f.name), data = typeof f.data === 'string' ? te.encode(f.data) : f.data, crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0, true); h.setUint16(8, 0, true); h.setUint16(10, dt, true); h.setUint16(12, dd, true);
+    h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, name.length, true); h.setUint16(28, 0, true);
+    parts.push(new Uint8Array(h.buffer), name, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0, true); c.setUint16(10, 0, true); c.setUint16(12, dt, true); c.setUint16(14, dd, true);
+    c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, name.length, true); c.setUint16(30, 0, true); c.setUint16(32, 0, true);
+    c.setUint16(34, 0, true); c.setUint16(36, 0, true); c.setUint32(38, 0, true); c.setUint32(42, off, true);
+    central.push(new Uint8Array(c.buffer), name);
+    off += 30 + name.length + data.length;
+  }
+  const csize = central.reduce((a, b) => a + b.length, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, csize, true); e.setUint32(16, off, true);
+  const all = [...parts, ...central, new Uint8Array(e.buffer)];
+  const out = new Uint8Array(all.reduce((a, b) => a + b.length, 0)); let p = 0; for (const a of all) { out.set(a, p); p += a.length; }
+  return out;
+}
+
+// ---- screen preview of a model (paper sheet)
+function previewSVG(m, forPrint) {
+  const pad = 0.6, x0 = m.bb.xmin - pad, y1 = m.bb.ymax + pad, W = m.bb.xmax - m.bb.xmin + 2 * pad, H = m.bb.ymax - m.bb.ymin + 2 * pad;
+  const P = (x, y) => `${(x - x0).toFixed(3)},${(y1 - y).toFixed(3)}`;
+  const o = [];
+  for (const it of m.items) if (it.t === 'line') o.push(`<polyline points="${it.pts.map(p => P(p[0], p[1])).join(' ')}" fill="none" stroke="${EXP_INK[it.layer]}" stroke-width="${((EXP_W[it.layer] || 0.18) / 10 * (forPrint ? 1 : 1.6)).toFixed(3)}" stroke-linejoin="round" stroke-linecap="round"/>`);
+  for (const it of m.items) if (it.t === 'text') { const x = it.x - x0, y = y1 - it.y; o.push(`<text x="${x.toFixed(3)}" y="${y.toFixed(3)}" font-size="${(it.h / 0.718).toFixed(3)}" fill="${EXP_INK[it.layer]}" text-anchor="${it.align === 'center' ? 'middle' : it.align === 'right' ? 'end' : 'start'}"${it.rot ? ` transform="rotate(${-it.rot} ${x.toFixed(3)} ${y.toFixed(3)})"` : ''} font-family="Helvetica, Arial, sans-serif">${esc(it.s)}</text>`); }
+  return `<svg viewBox="0 0 ${W.toFixed(2)} ${H.toFixed(2)}" role="img" aria-label="${esc(m.title)} at 1:100">${o.join('')}</svg>`;
+}
+
+// ---- Export tab
+// Inside Claude the page saves files through the downloads capability; on a normal website it uses plain browser downloads and printing.
+const IN_CLAUDE = !!(window.claude && window.claude.use);
+let DL = IN_CLAUDE ? undefined : null;   // undefined while checking, null when the capability is absent
+if (IN_CLAUDE) (async () => { try { DL = await window.claude.use('downloads'); } catch (e) { DL = null; } if (S.R && (S.tab === 'export' || DL === null)) render(); })();
+const CAN_PRINT = !IN_CLAUDE;
+// Drawing scale/units for DXF. Default: 1:100 in mm on the sheet.
+const EXP_UNITS = [
+  { v: 'p-mm', k: 10, scale: '1:100', tag: '1-100_mm', label: '1:100, mm on the sheet (1 m = 10 units)' },
+  { v: 'p-cm', k: 1, scale: '1:100', tag: '1-100_cm', label: '1:100, cm on the sheet (1 m = 1 unit)' },
+  { v: 'cm', k: 100, scale: '1:1', tag: '1-1_cm', label: 'Real size 1:1 in cm (1 m = 100 units)' },
+  { v: 'mm', k: 1000, scale: '1:1', tag: '1-1_mm', label: 'Real size 1:1 in mm (1 m = 1000 units)' },
+];
+const EXP = { kinds: { anchors: true, M: true, V: true, D: true }, unit: 'p-mm' };
+try { const e = JSON.parse(localStorage.getItem('wr-exp2') || 'null'); if (e && e.kinds) Object.assign(EXP, e); } catch (e) {}
+if (!EXP_UNITS.some(x => x.v === EXP.unit)) EXP.unit = 'p-mm';
+const expUnit = () => EXP_UNITS.find(x => x.v === EXP.unit);
+function expSave() { try { localStorage.setItem('wr-exp2', JSON.stringify(EXP)); } catch (e) {} }
+function safeName(s) { return String(s).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'section'; }
+let toastT;
+function toast(text, kind = '') { const t = $('#toast'); if (!t) return; t.textContent = text; t.className = 'toast ' + kind; t.hidden = false; clearTimeout(toastT); if (kind !== 'wait') toastT = setTimeout(() => { t.hidden = true; }, 4500); }
+async function saveFile(filename, data, msgEl) {
+  const say = (txt, kind) => { if (msgEl) { msgEl.textContent = txt; msgEl.className = 'exp-msg ' + kind; } toast(txt, kind); };
+  if (!DL && !IN_CLAUDE) {
+    const blob = new Blob([data], { type: /\.pdf$/.test(filename) ? 'application/pdf' : /\.zip$/.test(filename) ? 'application/zip' : 'application/octet-stream' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); say(`Downloaded ${filename}`, 'ok'); return;
+  }
+  if (!DL) { say('Saving files is not available in this view. Open the page on claude.ai to download.', 'err'); return; }
+  say('Confirm the download to save ' + filename, 'wait');
+  try { await DL.save({ filename, data }); say(`Saved ${filename}`, 'ok'); }
+  catch (e) {
+    const code = e && e.code;
+    say(code === 'declined' ? 'Download cancelled.' : code === 'rate_limited' ? 'Another download prompt is already open. Finish it, then try again.' : `Couldn't save the file (${code || e}).`, code === 'declined' ? '' : 'err');
+  }
+}
+function dxfFiles(R, kinds) {
+  const base = safeName(sectionName(R)), un = expUnit();
+  const models = kinds.map(k => exportModel(R, k));
+  const files = models.map(m => ({ name: `${base}_${EXP_KINDS.find(x => x.k === m.kind).short}_${un.tag}.dxf`, data: toDXF([m], un.k) }));
+  if (models.length > 1) files.push({ name: `${base}_all_${un.tag}.dxf`, data: toDXF(models, un.k) });
+  return { base, un, files, models };
+}
+function exportDXF(R, kinds, msgEl) { const { base, un, files } = dxfFiles(R, kinds); const nm = kinds.length === 1 ? `${base}_${EXP_KINDS.find(x => x.k === kinds[0]).short}_${un.tag}_DXF.zip` : `${base}_${un.tag}_DXF.zip`; saveFile(nm, toZip(files), msgEl); }
+function exportPDF(R, kinds, msgEl) { const base = safeName(sectionName(R)); const nm = kinds.length === 1 ? `${base}_${EXP_KINDS.find(x => x.k === kinds[0]).short}_1-100.pdf` : `${base}_1-100.pdf`; saveFile(nm, toPDF(kinds.map(k => exportModel(R, k))), msgEl); }
+// small "DXF 1:100 / PDF" buttons placed on each drawing
+function quickExp(kind) { return `<span class="exp-quick"><button type="button" class="btn sm" data-qx="dxf" data-kind="${kind}" title="Download this drawing as DXF (${esc(expUnit().label)})">DXF ${expUnit().scale}</button><button type="button" class="btn sm" data-qx="pdf" data-kind="${kind}" title="Download a PDF at 1:100">PDF</button>${CAN_PRINT ? `<button type="button" class="btn sm" data-qx="print" data-kind="${kind}" title="Print this drawing at 1:100">Print</button>` : ''}</span>`; }
+function wireQuick(root) { root.querySelectorAll('[data-qx]').forEach(b => b.onclick = () => ({ dxf: exportDXF, pdf: exportPDF, print: printDrawings }[b.dataset.qx])(S.R, [b.dataset.kind])); }
+// Print at true 1:100: each drawing on its own page, sized in mm (1 m = 10 mm)
+function printDrawings(R, kinds) {
+  const models = kinds.map(k => exportModel(R, k));
+  const size = m => [(m.bb.xmax - m.bb.xmin + 1.2) * 10, (m.bb.ymax - m.bb.ymin + 1.2) * 10];
+  const sheets = [['A4 portrait', 190, 270], ['A4 landscape', 277, 183], ['A3 portrait', 277, 393], ['A3 landscape', 400, 270], ['A2 portrait', 400, 567], ['A2 landscape', 574, 393], ['A1 portrait', 574, 814]];
+  const need = models.map(size);
+  const sheet = sheets.find(([, w, h]) => need.every(([a, b]) => a <= w && b <= h)) || sheets[sheets.length - 1];
+  let area = document.getElementById('printArea');
+  if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
+  area.innerHTML = models.map((m, i) => { const [w, h] = need[i]; return `<section class="print-page">${previewSVG(m, true).replace('<svg ', `<svg width="${w.toFixed(1)}mm" height="${h.toFixed(1)}mm" `)}<p class="print-note">${esc(sectionName(R))} · scale 1:100 on ${sheet[0]} · print at 100% (actual size): the 5 m bar measures 50 mm</p></section>`; }).join('');
+  let st = document.getElementById('printPageStyle');
+  if (!st) { st = document.createElement('style'); st.id = 'printPageStyle'; document.head.appendChild(st); }
+  st.textContent = `@page { size: ${sheet[0].replace(' portrait', '').replace(' landscape', '')} ${/landscape/.test(sheet[0]) ? 'landscape' : 'portrait'}; margin: 10mm; }`;
+  toast(`Printing on ${sheet[0]}. Set the scale to 100% / Actual size.`, 'ok');
+  setTimeout(() => window.print(), 50);
+}
+function renderExport(el0) {
+  const R = S.R, u = U();
+  const which = EXP_KINDS.filter(x => EXP.kinds[x.k] && (x.k !== 'anchors' || R.struts.length)).map(x => x.k);
+  const models = which.map(k => exportModel(R, k));
+  el0.innerHTML = `
+  <div class="panel">
+    <div class="panel-head"><h2>Drawings at 1:100 · ${esc(sectionName(R))}</h2><span class="hint">Wall at x = 0 and level ±0.00 at y = 0, so each drawing lines up with your own section.</span></div>
+    <div class="exp-opts">
+      <fieldset><legend>Drawings</legend>${EXP_KINDS.map(x => `<label class="chk"><input type="checkbox" id="exp-${x.k}" data-k="${x.k}" ${EXP.kinds[x.k] ? 'checked' : ''} ${x.k === 'anchors' && !R.struts.length ? 'disabled' : ''}> ${x.label}</label>`).join('')}</fieldset>
+      <label class="sel" for="exp-unit"><span>Scale and units of the DXF</span><select id="exp-unit">${EXP_UNITS.map(x => `<option value="${x.v}" ${EXP.unit === x.v ? 'selected' : ''}>${x.label}</option>`).join('')}</select></label>
+      <div class="exp-btns">
+        <button type="button" class="btn primary" id="exp-dxf" ${which.length ? '' : 'disabled'}>Download DXF ${expUnit().scale} (.zip)</button>
+        <button type="button" class="btn" id="exp-pdf" ${which.length ? '' : 'disabled'}>PDF 1:100</button>
+        ${CAN_PRINT ? `<button type="button" class="btn" id="exp-print" ${which.length ? '' : 'disabled'}>Print 1:100</button>` : ''}
+      </div>
+    </div>
+    <p class="exp-msg" id="exp-msg">${DL === null && IN_CLAUDE ? 'Saving files is not available in this view. Open the page on claude.ai to download.' : ''}</p>
+    <ul class="hint exp-notes">
+      <li><b>DXF</b> (default 1:100, mm on the sheet): one file per drawing plus one with all of them side by side, AutoCAD R12 format, layers named WLP-. Text is 2.5 mm high on the sheet. Choose real size 1:1 above if you draw full size in model space.</li>
+      <li><b>PDF</b>: one page per drawing at 1:100 on the smallest A-size sheet that fits, for printing at actual size (the 5 m bar measures 50 mm).</li>${CAN_PRINT ? `<li><b>Print</b>: sends the drawings straight to your printer at 1:100. In the print dialog set the scale to 100% / Actual size.</li>` : ''}
+      <li>Every drawing in the app has its own DXF and PDF buttons using these settings. Forces are in ${esc(u.F)} as selected at the top of the page, and each diagram states its value scale (1 cm on the sheet = so many ${esc(asciiUnit(u.M))}).</li>
+    </ul>
+  </div>
+  <div class="paper-grid">${models.map(m => `<figure class="paper" style="flex:${(m.bb.xmax - m.bb.xmin + 1.2).toFixed(2)} 1 0"><div class="paper-sheet">${previewSVG(m)}</div><figcaption>${esc(EXP_KINDS.find(x => x.k === m.kind).label)}${m.diag ? ` · 1 cm = ${+m.diag.per.toPrecision(6)} ${esc(m.diag.unit)}` : ''}</figcaption></figure>`).join('')}</div>`;
+  const msg = el0.querySelector('#exp-msg');
+  el0.querySelectorAll('input[data-k]').forEach(c => c.onchange = () => { EXP.kinds[c.dataset.k] = c.checked; expSave(); render(); });
+  el0.querySelector('#exp-unit').onchange = e => { EXP.unit = e.target.value; expSave(); render(); };
+  el0.querySelector('#exp-dxf').onclick = () => exportDXF(R, which, msg);
+  el0.querySelector('#exp-pdf').onclick = () => exportPDF(R, which, msg);
+  const pb = el0.querySelector('#exp-print'); if (pb) pb.onclick = () => printDrawings(R, which);
+}
+
+// ---------- STAGES
+function renderStages(el0) {
+  const R = S.R, u = U();
+  const sf = strutForceRows(R);
+  const target = R.options.fosTarget;
+  el0.innerHTML = `
+  <div class="panel">
+    <div class="panel-head"><h2>Construction sequence</h2><span class="hint">${esc(R.options.stabilityMethod || '')}${target ? ` · required FoS on soil strength ${target.toFixed(2)}` : ''}</span></div>
+    <div class="tscroll"><table><thead><tr><th class="l">Stage</th><th class="l">What happens</th><th>Ground<small>ret. / exc.</small></th><th>FoS</th><th>Toe for FoS<small>el.</small></th><th>M max / min<small>${u.M}</small></th><th>V max<small>${u.Fm}</small></th><th>Displ.<small>mm</small></th><th>Anchor forces<small>${u.F}/anchor, axial</small></th></tr></thead><tbody>
+    ${R.stages.map(s => {
+      const st = R.summary.stability.find(x => x.stage === s.no) || R.results[s.no]?.stability; const g = R.derived.stageState.find(x => x.stage === s.no);
+      const m = R.summary.stageMax.find(x => x.stage === s.no); const d = R.summary.stageDisp.find(x => x.stage === s.no);
+      const f = sf.filter(r => r.stage === s.no);
+      const fos = st?.fos != null ? `${st.fos.toFixed(2)} ${target ? (st.fos >= target ? '<span class="chip good">✓</span>' : '<span class="chip crit">▼ low</span>') : ''}` : `<span class="hint">${st?.note ? 'n/a' : '–'}</span>`;
+      return `<tr><td class="l">${s.no}</td><td class="txt">${esc(s.desc)}</td><td>${el(g?.glActive)} / ${el(g?.glPassive)}</td><td>${fos}</td><td>${st?.toeForFos != null ? el(st.toeForFos) : '–'}</td><td>${m ? fF(m.MMax) + ' / ' + fF(m.MMin) : '–'}</td><td>${m ? fF(Math.max(Math.abs(m.VMax), Math.abs(m.VMin))) : '–'}</td><td>${d ? mm(Math.max(Math.abs(d.dMax), Math.abs(d.dMin))) : '–'}</td><td>${f.length ? f.map(r => `A${r.no}: ${fF(r.axial)}`).join('<br>') : '–'}</td></tr>`;
+    }).join('')}</tbody></table></div>
+    <p class="hint" style="margin:8px 0 0">"n/a" means WALLAP reported the stage as not suitable for a factor of safety calculation.</p>
+  </div>
+  <div class="panel"><h3 style="margin-bottom:6px">Analysis settings</h3><div class="keys">
+    <div><span>Moment calculation</span><b style="font-family:var(--font-body)">${esc(R.options.bmMethod || '–')}</b></div>
+    <div><span>Wall length in model</span><b>${R.options.wallLength ?? '–'} m</b></div>
+    <div><span>Wall E / I</span><b>${R.wall.E ? (R.wall.E * u.f).toExponential(3) : '–'} ${u.P} / ${R.wall.I ?? '–'} m⁴/m</b></div>
+    <div><span>Yield moment</span><b style="font-family:var(--font-body)">${esc(R.wall.yieldMoment || '–')}</b></div>
+  </div></div>`;
+}
+
+// open with the example so the page shows what it does
+loadText(SAMPLE_TEXT, 'Example report', true);
+</script>
+
+</body>
+</html>
