@@ -11,4 +11,4 @@ Open a WALLAP results report (PDF) in the browser and get:
 Everything runs in the browser. Reports you open are read on your own computer and are not uploaded anywhere.
 The values shown are read from the WALLAP report; nothing is re-analysed.
 
-Live site: https://itaykoma1-ops.github.io/wallap-reader/
+Live site: https://itayk-eng.github.io/wallap-reader/
