@@ -926,10 +926,12 @@ function sectionSVG(R, stageNo, opts = {}) {
     out.push(`<g class="${on ? 'anchor' : 'anchor ghost'}"><line x1="${X(0)}" y1="${Y(a.elev)}" x2="${X(x1)}" y2="${Y(y1)}"/><line class="bond" x1="${X(x1)}" y1="${Y(y1)}" x2="${X(bx)}" y2="${Y(a.elev + bx * Math.tan(ang))}"/><rect x="${X(0) - (compact ? 2 : 3)}" y="${Y(a.elev) - (compact ? 5 : 7)}" width="${compact ? 4 : 6}" height="${compact ? 10 : 14}"/></g>`);
     if (compact) continue;
     const f = forces[a.no];
-    const tx = X(x1 * 0.55), tyl = Y(a.elev - L * 0.55 * Math.sin(ang));
+    // label sits on top of the strut, starting just beyond the angle mark at the wall and running outward
+    const dpx = a.incl ? 100 : 24, ca0 = Math.cos(ang), sa0 = Math.sin(ang);
+    const tx = X(0) - dpx * ca0 - 7 * sa0, tyl = Y(a.elev) + dpx * sa0 - 7 * ca0;
     const rot = `rotate(${-(a.incl || 0)} ${tx} ${tyl})`;
-    if (!on) { out.push(`<text class="anchor-label ghost" x="${tx}" y="${tyl - 7}" text-anchor="middle" transform="${rot}">Strut ${a.no} (not yet installed)</text>`); continue; }
-    out.push(`<text class="anchor-label" x="${tx}" y="${tyl + 16}" text-anchor="middle" transform="${rot}">Strut ${a.no}${f ? `: ${fF(f.perM, 2)} ${u.Fm}` : ''}</text>`);
+    if (!on) { out.push(`<text class="anchor-label ghost" x="${tx}" y="${tyl}" text-anchor="end" transform="${rot}">Strut ${a.no} (not yet installed)</text>`); continue; }
+    out.push(`<text class="anchor-label" x="${tx}" y="${tyl}" text-anchor="end" transform="${rot}">Strut ${a.no}${f ? `: ${fF(f.perM, 2)} ${u.Fm}` : ''}</text>`);
     // angle between the horizontal and the anchor, marked at the wall
     if (a.incl) {
       const x0 = X(0), y0 = Y(a.elev), rp = 40;
@@ -1641,8 +1643,8 @@ function exportModel(R, kind, scale) {
         text('WLP-DIM', -rr - 0.12 * q, a.elev - rr * Math.sin(ang / 2) - 0.5 * Hs, `${fx(deg, deg % 1 ? 1 : 0)}°`, Hs, 'right');
       }
       const g = gov[a.no];
-      const mx = -L * 0.55 * ca, my = a.elev - L * 0.55 * sa, off = -0.16 * q - 0.3 * q;
-      text('WLP-ANCHOR', mx - sa * off, my + ca * off, `Strut ${a.no}: ${g ? fx(g.perM * f, 2) + ' ' + Fm : 'no force in report'}`, 0.3 * q, 'center', deg);
+      const d = deg ? 2.6 * q : 0.4 * q, off = 0.16 * q;   // on top of the strut, clear of the angle mark
+      text('WLP-ANCHOR', -d * ca - sa * off, a.elev - d * sa + ca * off, `Strut ${a.no}: ${g ? fx(g.perM * f, 2) + ' ' + Fm : 'no force in report'}`, 0.3 * q, 'right', deg);
     } else {
       line('WLP-ANCHOR', [[0, a.elev], [-0.7 * q * ca, a.elev - 0.7 * q * sa]]);
     }
