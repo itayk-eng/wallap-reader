@@ -261,6 +261,9 @@ select:focus-visible, label.chk input:focus-visible { outline: 2px solid var(--a
 .rchip .x:hover { color: var(--crit); }
 .rchip.on { border-color: var(--accent); background: var(--accent-soft); }
 .rchip.on button:first-child { font-weight: 600; color: var(--ink); }
+
+.seg.sm button { padding: 6px 8px; font-size: 12px; }
+.exp-quick { align-items: center; flex-wrap: wrap; }
 .foot { color: var(--muted); font-size: 12px; max-width: 80ch; }
 .anchors-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
 .acard { border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
@@ -1899,8 +1902,19 @@ function dxfFiles(R, kinds) {
 function exportDXF(R, kinds, msgEl) { const { base, files, tag } = dxfFiles(R, kinds); const nm = kinds.length === 1 ? `${base}_${EXP_KINDS.find(x => x.k === kinds[0]).short}_${tag}_DXF.zip` : `${base}_${tag}_DXF.zip`; saveFile(nm, toZip(files), msgEl); }
 function exportPDF(R, kinds, msgEl) { const sc = EXP.scale, base = safeName(sectionName(R)); const nm = kinds.length === 1 ? `${base}_${EXP_KINDS.find(x => x.k === kinds[0]).short}_1-${sc}.pdf` : `${base}_1-${sc}.pdf`; saveFile(nm, toPDF(kinds.map(k => exportModel(R, k, sc))), msgEl); }
 // small "DXF 1:100 / PDF" buttons placed on each drawing
-function quickExp(kind) { const sc = EXP.scale; return `<span class="exp-quick"><button type="button" class="btn sm" data-qx="dxf" data-kind="${kind}" title="Download this drawing as DXF (${esc(expUnit().label(sc))})">DXF 1:${sc}</button><button type="button" class="btn sm" data-qx="pdf" data-kind="${kind}" title="Download a PDF at 1:${sc}">PDF</button>${CAN_PRINT ? `<button type="button" class="btn sm" data-qx="print" data-kind="${kind}" title="Print this drawing at 1:${sc}">Print</button>` : ''}</span>`; }
-function wireQuick(root) { root.querySelectorAll('[data-qx]').forEach(b => b.onclick = () => ({ dxf: exportDXF, pdf: exportPDF, print: printDrawings }[b.dataset.qx])(S.R, [b.dataset.kind])); }
+function quickExp(kind) {
+  const sc = EXP.scale;
+  return `<span class="exp-quick"><span class="seg sm" role="group" aria-label="Scale">${EXP_SCALES.map(v => `<button type="button" data-qscale="${v}" aria-pressed="${sc === v}">1:${v}</button>`).join('')}</span><button type="button" class="btn sm" data-qx="dxf" data-kind="${kind}" title="Download this drawing as DXF at the selected scale">DXF</button><button type="button" class="btn sm" data-qx="pdf" data-kind="${kind}" title="Download a PDF at the selected scale">PDF</button>${CAN_PRINT ? `<button type="button" class="btn sm" data-qx="print" data-kind="${kind}" title="Print this drawing at the selected scale">Print</button>` : ''}</span>`;
+}
+function wireQuick(root) {
+  root.querySelectorAll('[data-qx]').forEach(b => b.onclick = () => ({ dxf: exportDXF, pdf: exportPDF, print: printDrawings }[b.dataset.qx])(S.R, [b.dataset.kind]));
+  // one scale for every drawing; update the switches in place so the page doesn't jump
+  root.querySelectorAll('[data-qscale]').forEach(b => b.onclick = () => {
+    EXP.scale = +b.dataset.qscale; expSave();
+    document.querySelectorAll('[data-qscale]').forEach(x => x.setAttribute('aria-pressed', String(+x.dataset.qscale === EXP.scale)));
+    toast(`Drawings will export at 1:${EXP.scale}`, 'ok');
+  });
+}
 // Print at true 1:100: each drawing on its own page, sized in mm (1 m = 10 mm)
 function printDrawings(R, kinds) {
   const sc = EXP.scale, mpm = 1000 / sc;
