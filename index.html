@@ -544,7 +544,9 @@ function parseWallap(text) {
       continue;
     }
     if (inSummary && /^Strut forces at each stage/.test(l)) {
-      R.summary.strutHoriz = /horizontal/i.test(l);
+      // what the table holds: 'horizontal' components, or forces along the anchor ('inclined'); null if the report doesn't say
+      R.summary.strutKind = /horizontal|horiz\./i.test(l) ? 'horizontal' : /inclined|axial|along/i.test(l) ? 'inclined' : null;
+      R.summary.strutHoriz = R.summary.strutKind === 'horizontal';
       // WALLAP prints this table in blocks of up to three struts ("--- Strut no. 1 --- ... no. 3"), then
       // "--- Strut no. 4 --- ..." and so on, sometimes across a page break. Each block has its own header.
       let cols = []; const allCols = []; const byStage = new Map();
@@ -601,7 +603,10 @@ function parseWallap(text) {
     st.stage = s.no; st.desc = s.desc;
     R.derived.stageState.push(st);
   }
-  if (R.summary.strutHoriz == null) R.summary.strutHoriz = Object.values(R.results).some(r => r.strutForces.some(f => f.perMInclined != null));
+  if (R.summary.strutHoriz == null) {   // no summary table: the per-stage lines say "(horiz.)" for the value we use
+    R.summary.strutHoriz = Object.values(R.results).some(r => r.strutForces.some(f => f.perMInclined != null));
+    R.summary.strutKind = R.summary.strutHoriz ? 'horizontal' : null;
+  }
   if (!R.stages.length) R.warnings.push('No construction stages found. Is this a WALLAP report?');
   if (!Object.keys(R.results).length && !R.summary.envelope.length) R.warnings.push('No bending moment results found in this report.');
   return R;
@@ -844,6 +849,7 @@ function stepper(stages, current, attr, enabled) {
 // ---------- SECTION DRAWING
 function soilClass(no) { return 'soil-' + (((no - 1) % 4) + 1); }
 const secData = {}; let secSeq = 0;
+function kindWords(R) { return R.summary.strutKind === 'horizontal' ? 'horizontal, ' : R.summary.strutKind === 'inclined' ? 'along the anchor, ' : ''; }
 function sectionName(R) { return R.meta.title || R.meta.runId || S.fileName || 'Section'; }
 // opts: forces {no: row}, ghosts, title, subtitle, compact, diagram {curves:[{name,color,pts:[{y,v}]}], dir, fmt, unit}
 function sectionSVG(R, stageNo, opts = {}) {
@@ -947,6 +953,12 @@ function sectionSVG(R, stageNo, opts = {}) {
     if (!on) { out.push(`<text class="anchor-label ghost" x="${tx}" y="${tyl}" text-anchor="end" transform="${rot}">Strut ${a.no} (not yet installed)</text>`); continue; }
     const incl = showIncl && f && a.incl ? `<tspan class="incl">(${fF(f.perM / ca0, 2)} ${u.Fm} INCLINED)</tspan><tspan dx="9">` : '<tspan>';
     out.push(`<text class="anchor-label" x="${tx}" y="${tyl}" text-anchor="end" transform="${rot}">${incl}Strut ${a.no}${f ? `: ${fF(f.perM, 2)} ${u.Fm}` : ''}</tspan></text>`);
+    // under the label: what the report's number is
+    const kindTag = f && R.summary.strutKind === 'horizontal' ? '(horizontal component)' : f && R.summary.strutKind === 'inclined' ? '(INCLINED)' : '';
+    if (kindTag) {
+      const bx = X(0) - dpx * ca0 + 15 * sa0, by = Y(a.elev) + dpx * sa0 + 15 * ca0;
+      out.push(`<text class="anchor-kind" x="${bx}" y="${by}" text-anchor="end" transform="rotate(${-(a.incl || 0)} ${bx} ${by})">${kindTag}</text>`);
+    }
     // angle between the horizontal and the anchor, marked at the wall
     if (a.incl) {
       const x0 = X(0), y0 = Y(a.elev), rp = 40;
@@ -1033,7 +1045,7 @@ function sectionSVG(R, stageNo, opts = {}) {
     .wall{stroke:var(--wall);stroke-width:${compact ? 4 : 7};stroke-linecap:butt}
     .anchor line{stroke:var(--anchor);stroke-width:${compact ? 1.8 : 2.5}} .anchor .bond{stroke-width:${compact ? 4 : 6};stroke-opacity:.45;stroke-linecap:round} .anchor rect{fill:var(--anchor)}
     .anchor.ghost line,.anchor.ghost rect{stroke:var(--muted);fill:var(--muted);stroke-dasharray:4 4;opacity:.6}
-    .anchor-label{fill:var(--anchor);font-size:13px;font-weight:700;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label .incl{fill:var(--ink);font-size:12px;font-weight:600} .anchor-label.ghost{fill:var(--muted);font-weight:400}
+    .anchor-label{fill:var(--anchor);font-size:13px;font-weight:700;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label .incl{fill:var(--ink);font-size:12px;font-weight:600} .anchor-kind{fill:var(--ink-2);font-size:11px;font-weight:500;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label.ghost{fill:var(--muted);font-weight:400}
     .anchor-sub{fill:var(--ink);font-size:12px;font-family:var(--font-mono);paint-order:stroke;stroke:var(--soil-2);stroke-width:3px}
     .ang line,.ang path{stroke:var(--ink);stroke-width:1.1;fill:none} .ang text{fill:var(--ink);font-size:12px;font-weight:600;font-family:var(--font-mono);paint-order:stroke;stroke:var(--soil-2);stroke-width:3px}
     .sur line{stroke:var(--ink-2);stroke-width:1.2} .sur path{fill:var(--ink-2)} .sur text{fill:var(--ink);font-size:12px} .sur.ghost{opacity:.35}
@@ -1333,8 +1345,8 @@ function renderOverview(el0) {
   <div class="two">
     <div class="panel">
       <div class="panel-head"><h2>Final section and anchors</h2><span class="hint">Stage ${lastNo ?? '–'}: ${esc(st?.desc || '')}</span>${R.struts.length ? quickExp('anchors') : ''}</div>
-      <div class="drawing">${sectionSVG(R, lastNo, { forces: gov, title: name, subtitle: `Final section · stage ${lastNo ?? ''} · strut levels and maximum strut forces (horizontal, per m)` })}</div>
-      <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i class="dash" style="border-color:var(--water)"></i>Water table</span>${R.struts.length ? `<span><i style="border-color:var(--anchor)"></i>Strut: maximum horizontal force per m of wall from the report${R.summary.strutHoriz ? '; in brackets the force along the anchor (INCLINED)' : ''}; angle from the horizontal</span>` : ''}</div>
+      <div class="drawing">${sectionSVG(R, lastNo, { forces: gov, title: name, subtitle: `Final section · stage ${lastNo ?? ''} · strut levels and maximum strut forces (${kindWords(R)}per m)` })}</div>
+      <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i class="dash" style="border-color:var(--water)"></i>Water table</span>${R.struts.length ? `<span><i style="border-color:var(--anchor)"></i>Strut: maximum force per m of wall from the report${R.summary.strutHoriz ? ' (horizontal component); on the left in brackets the force along the anchor (INCLINED)' : R.summary.strutKind === 'inclined' ? ' (along the anchor, INCLINED)' : ''}; angle from the horizontal</span>` : ''}</div>
     </div>
     <div class="panel">
       <h3 style="margin-bottom:6px">Final section</h3>
@@ -1379,8 +1391,8 @@ function renderAnchors(el0) {
   el0.innerHTML = `
   <div class="panel">
     <div class="panel-head"><h2>${esc(name)} · anchor layout</h2><span class="hint">Each anchor shows its maximum force from the consultant's report</span>${quickExp('anchors')}</div>
-    <div class="drawing">${sectionSVG(R, last, { forces: gov, title: name, subtitle: 'Strut layout · maximum force per strut from the WALLAP report (horizontal, per m of wall)' })}</div>
-    <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i style="border-color:var(--anchor)"></i>Strut: maximum horizontal force per m of wall from the report${R.summary.strutHoriz ? '; in brackets the force along the anchor (INCLINED)' : ''}; angle from the horizontal</span></div>
+    <div class="drawing">${sectionSVG(R, last, { forces: gov, title: name, subtitle: `Strut layout · maximum force per strut from the WALLAP report (${kindWords(R)}per m of wall)` })}</div>
+    <div class="legend" style="margin-top:10px">${soilLegend(R)}<span><i style="border-color:var(--anchor)"></i>Strut: maximum force per m of wall from the report${R.summary.strutHoriz ? ' (horizontal component); on the left in brackets the force along the anchor (INCLINED)' : R.summary.strutKind === 'inclined' ? ' (along the anchor, INCLINED)' : ''}; angle from the horizontal</span></div>
     <p class="hint" style="margin:8px 0 0"><button type="button" class="link" data-goto="export">Export at 1:100 (DXF / PDF) →</button></p>
   </div>
   <div class="anchors-grid">${R.struts.map(a => { const g = gov[a.no]; const inst = R.stages.find(s => new RegExp('(strut|anchor) no\\.\\s*' + a.no + '\\b', 'i').test(s.desc) && /install/i.test(s.desc)); return `
@@ -1629,7 +1641,7 @@ function exportModel(R, kind, scale) {
       return (2.6 * q + w1 + w2) * ca; }));
     xmin = -(Math.max(reach, lab) + 1.2); xmax = 4.5;
     title = 'Section and struts, final stage' + (lastNo != null ? ' ' + lastNo : '');
-    summary = 'maximum strut forces from the WALLAP report (horizontal, per m of wall)' + (R.summary.strutHoriz ? '; force along the anchor in brackets (INCLINED)' : '');
+    summary = 'maximum strut forces from the WALLAP report, per m of wall' + (R.summary.strutHoriz ? ' (horizontal component); force along the anchor in brackets (INCLINED)' : R.summary.strutKind === 'inclined' ? ' (along the anchor, INCLINED)' : '');
   }
   // wall, ground, water
   line('WLP-WALL', [[0, top], [0, toe]]);
@@ -1665,6 +1677,8 @@ function exportModel(R, kind, scale) {
       const d = deg ? 2.6 * q : 0.4 * q, off = 0.16 * q;   // on top of the strut, clear of the angle mark
       const main = `Strut ${a.no}: ${g ? fx(g.perM * f, 2) + ' ' + Fm : 'no force in report'}`;
       text('WLP-ANCHOR', -d * ca - sa * off, a.elev - d * sa + ca * off, main, 0.3 * q, 'right', deg);
+      const kindTag = g && R.summary.strutKind === 'horizontal' ? '(horizontal component)' : g && R.summary.strutKind === 'inclined' ? '(INCLINED)' : '';
+      if (kindTag) { const ob = -(0.16 * q + 0.2 * q); text('WLP-TEXT', -d * ca - sa * ob, a.elev - d * sa + ca * ob, kindTag, 0.2 * q, 'right', deg); }
       if (g && R.summary.strutHoriz && deg) {
         const d2 = d + textWidth(main) * 0.3 * q / 0.718 + 0.35 * q;
         text('WLP-TEXT', -d2 * ca - sa * off, a.elev - d2 * sa + ca * off, `(${fx(g.perM * f / ca, 2)} ${Fm} INCLINED)`, 0.25 * q, 'right', deg);
@@ -2024,6 +2038,6 @@ function renderStages(el0) {
 loadText(SAMPLE_TEXT, 'Example report', true);
 </script>
 
-<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-05 07:40 UTC</p>
+<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-06 08:32 UTC</p>
 </body>
 </html>
