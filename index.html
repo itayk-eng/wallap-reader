@@ -954,7 +954,7 @@ function sectionSVG(R, stageNo, opts = {}) {
     const incl = showIncl && f && a.incl ? `<tspan class="incl">(${fF(f.perM / ca0, 2)} ${u.Fm} INCLINED)</tspan><tspan dx="9">` : '<tspan>';
     out.push(`<text class="anchor-label" x="${tx}" y="${tyl}" text-anchor="end" transform="${rot}">${incl}Strut ${a.no}${f ? `: ${fF(f.perM, 2)} ${u.Fm}` : ''}</tspan></text>`);
     // under the label: what the report's number is
-    const kindTag = f && R.summary.strutKind === 'horizontal' ? '(horizontal component)' : f && R.summary.strutKind === 'inclined' ? '(INCLINED)' : '';
+    const kindTag = f && R.summary.strutKind === 'horizontal' ? '(Horizontal comp.)' : f && R.summary.strutKind === 'inclined' ? '(INCLINED)' : '';
     if (kindTag) {
       const bx = X(0) - dpx * ca0 + 15 * sa0, by = Y(a.elev) + dpx * sa0 + 15 * ca0;
       out.push(`<text class="anchor-kind" x="${bx}" y="${by}" text-anchor="end" transform="rotate(${-(a.incl || 0)} ${bx} ${by})">${kindTag}</text>`);
@@ -1045,7 +1045,7 @@ function sectionSVG(R, stageNo, opts = {}) {
     .wall{stroke:var(--wall);stroke-width:${compact ? 4 : 7};stroke-linecap:butt}
     .anchor line{stroke:var(--anchor);stroke-width:${compact ? 1.8 : 2.5}} .anchor .bond{stroke-width:${compact ? 4 : 6};stroke-opacity:.45;stroke-linecap:round} .anchor rect{fill:var(--anchor)}
     .anchor.ghost line,.anchor.ghost rect{stroke:var(--muted);fill:var(--muted);stroke-dasharray:4 4;opacity:.6}
-    .anchor-label{fill:var(--anchor);font-size:13px;font-weight:700;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label .incl{fill:var(--ink);font-size:12px;font-weight:600} .anchor-kind{fill:var(--ink-2);font-size:11px;font-weight:500;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label.ghost{fill:var(--muted);font-weight:400}
+    .anchor-label{fill:var(--anchor);font-size:13px;font-weight:700;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label .incl{fill:var(--ink);font-size:12px;font-weight:600} .anchor-kind{fill:var(--anchor);font-size:11.5px;font-weight:600;paint-order:stroke;stroke:var(--soil-2);stroke-width:3px} .anchor-label.ghost{fill:var(--muted);font-weight:400}
     .anchor-sub{fill:var(--ink);font-size:12px;font-family:var(--font-mono);paint-order:stroke;stroke:var(--soil-2);stroke-width:3px}
     .ang line,.ang path{stroke:var(--ink);stroke-width:1.1;fill:none} .ang text{fill:var(--ink);font-size:12px;font-weight:600;font-family:var(--font-mono);paint-order:stroke;stroke:var(--soil-2);stroke-width:3px}
     .sur line{stroke:var(--ink-2);stroke-width:1.2} .sur path{fill:var(--ink-2)} .sur text{fill:var(--ink);font-size:12px} .sur.ghost{opacity:.35}
@@ -1677,8 +1677,8 @@ function exportModel(R, kind, scale) {
       const d = deg ? 2.6 * q : 0.4 * q, off = 0.16 * q;   // on top of the strut, clear of the angle mark
       const main = `Strut ${a.no}: ${g ? fx(g.perM * f, 2) + ' ' + Fm : 'no force in report'}`;
       text('WLP-ANCHOR', -d * ca - sa * off, a.elev - d * sa + ca * off, main, 0.3 * q, 'right', deg);
-      const kindTag = g && R.summary.strutKind === 'horizontal' ? '(horizontal component)' : g && R.summary.strutKind === 'inclined' ? '(INCLINED)' : '';
-      if (kindTag) { const ob = -(0.16 * q + 0.2 * q); text('WLP-TEXT', -d * ca - sa * ob, a.elev - d * sa + ca * ob, kindTag, 0.2 * q, 'right', deg); }
+      const kindTag = g && R.summary.strutKind === 'horizontal' ? '(Horizontal comp.)' : g && R.summary.strutKind === 'inclined' ? '(INCLINED)' : '';
+      if (kindTag) { const ob = -(0.16 * q + 0.2 * q); text('WLP-ANCHOR', -d * ca - sa * ob, a.elev - d * sa + ca * ob, kindTag, 0.2 * q, 'right', deg); }
       if (g && R.summary.strutHoriz && deg) {
         const d2 = d + textWidth(main) * 0.3 * q / 0.718 + 0.35 * q;
         text('WLP-TEXT', -d2 * ca - sa * off, a.elev - d2 * sa + ca * off, `(${fx(g.perM * f / ca, 2)} ${Fm} INCLINED)`, 0.25 * q, 'right', deg);
@@ -2038,6 +2038,6 @@ function renderStages(el0) {
 loadText(SAMPLE_TEXT, 'Example report', true);
 </script>
 
-<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-06 08:32 UTC</p>
+<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-06 08:40 UTC</p>
 </body>
 </html>
