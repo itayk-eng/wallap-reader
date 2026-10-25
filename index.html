@@ -1615,7 +1615,7 @@ function renderDesign(el0) {
       <label for="dz-limit"><span>Max per anchor, service <span class="u">${u.F}</span></span><input id="dz-limit" type="number" step="1" min="1" value="${val(ts.limit, 0)}"></label>
       <label for="dz-factor"><span>Factor on consultant force</span><input id="dz-factor" type="number" step="0.05" min="0.5" max="3" value="${DZ.factor.toFixed(2)}"></label>
     </div>
-    <p class="hint" style="margin:10px 0 0">Allowable load per ${T.one} is fixed at ${fF(ts.brk * ts.ratio, 2)} ${u.F} (0.6" ${T.one}, 0.60 of the 26.5 t breaking load, as set by the soil consultant). Recommended maximum for ${T.label.toLowerCase()} anchors: ${fF(ts.limit, 0)} ${u.F} per anchor in service. Ideal spacing between anchors is ${IDEAL_S[0]}–${IDEAL_S[1]} m.</p>
+    <p class="hint" style="margin:10px 0 0">Allowable load per ${T.one}: ${fF(ts.brk * ts.ratio, 2)} ${u.F} (standard 0.6" strand, 0.60 of its 26.5 t breaking load). This is a standard value, not from the WALLAP report; check it against the soil consultant's anchor specification. Recommended maximum for ${T.label.toLowerCase()} anchors: ${fF(ts.limit, 0)} ${u.F} per anchor in service. Ideal spacing between anchors is ${IDEAL_S[0]}–${IDEAL_S[1]} m.</p>
   </div>
   <div class="dz-layout"><div class="dz-main">
   ${R.struts.map(a => { const g = gov[a.no], r = rows[a.no]; return `
@@ -2181,6 +2181,6 @@ function renderStages(el0) {
 loadText(SAMPLE_TEXT, 'Example report', true);
 </script>
 
-<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-25 09:57 UTC</p>
+<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-25 10:08 UTC</p>
 </body>
 </html>
