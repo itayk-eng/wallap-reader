@@ -281,6 +281,13 @@ table.mx small.bad, td.bad { color: var(--crit); font-weight: 600; }
 .dz-in .chk { font-size: 13px; color: var(--ink); }
 .dz-in input[type=number]:disabled { opacity: .5; }
 b.ovr { color: var(--anchor); font-weight: 600; }
+
+.dz-layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; align-items: start; }
+.dz-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.dz-side { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.dz-side svg.ev { display: block; width: 100%; height: auto; max-height: calc(100vh - 190px); }
+.dz-side-foot { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px; }
+@media (max-width: 1100px) { .dz-layout { grid-template-columns: minmax(0, 1fr); } .dz-side { position: static; order: -1; } .dz-side svg.ev { max-width: 560px; max-height: 70vh; margin: 0 auto; } }
 .foot { color: var(--muted); font-size: 12px; max-width: 80ch; }
 .anchors-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
 .acard { border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
@@ -1471,15 +1478,18 @@ const DZ_TYPES = {
   poly: { label: 'Polymer', short: 'Polymer', one: 'tendon', many: 'tendons' },
 };
 const IDEAL_S = [1.5, 2.5];   // ideal spacing range, m
-const DZ = { type: 'steel', factor: 1.0,
+// Strand / tendon data is fixed (set by the soil consultant): 0.6" strand, breaking load 26.5 t, used at 0.60.
+const DZ = { type: 'steel', factor: 1.0, viewL: null,
   steel: { brk: 26.5, ratio: 0.6, limit: 60 },      // tonnes
-  poly: { brk: null, ratio: null, limit: 45 } };    // polymer element data comes from the supplier
+  poly: { brk: 26.5, ratio: 0.6, limit: 45 } };
 try {
   const g = JSON.parse(localStorage.getItem('wr-dz') || 'null');
   if (g) {
-    if (g.steel || g.poly) { Object.assign(DZ.steel, g.steel || {}); Object.assign(DZ.poly, g.poly || {}); if (g.type in DZ_TYPES) DZ.type = g.type; }
-    else if (g.strandBreak > 0) { DZ.steel.brk = g.strandBreak; DZ.steel.ratio = g.ratio || 0.6; }   // older saved settings
+    if (g.type in DZ_TYPES) DZ.type = g.type;
+    if (g.steel && g.steel.limit > 0) DZ.steel.limit = g.steel.limit;
+    if (g.poly && g.poly.limit > 0) DZ.poly.limit = g.poly.limit;
     if (g.factor > 0) DZ.factor = g.factor;
+    if (g.viewL > 0) DZ.viewL = g.viewL;
   }
 } catch (e) {}
 const dzT = () => DZ[DZ.type];
@@ -1552,6 +1562,45 @@ function dzMatrix(R, a, g, row) {
   </div>
   <div class="legend" style="margin-top:4px"><span><b>Bold</b> = fewest ${t.many} at that spacing</span><span>★ recommended: ideal zone with the fewest ${t.many} per metre of wall</span><span>Outlined = your choice. Click a cell to choose it.</span></div>`;
 }
+function dzViewL(R) { return DZ.viewL || Math.round(Math.min(R.options.wallLength || 20, 40)); }
+// elevation of the wall face with every strut row laid out at its chosen spacing
+function dzElevation(R, rows, gov) {
+  const u = U(), T = DZ_TYPES[DZ.type];
+  const L = dzViewL(R), top = R.derived.wallTop, toe = R.wall.toe ?? top - 10;
+  const last = R.derived.stageState[R.derived.stageState.length - 1], exc = last ? last.glPassive : null;
+  const W = 380, ml = 40, mr = 8, mt = 12, mb = 22;
+  const k = (W - ml - mr) / L, H = (top - toe) * k + mt + mb;
+  const X = x => ml + x * k, Y = y => mt + (top - y) * k;
+  const o = [];
+  const yE = exc != null && exc > toe && exc < top ? exc : null;
+  o.push(`<rect x="${X(0)}" y="${Y(top)}" width="${L * k}" height="${((yE ?? toe) - top) * -k}" class="ev-face"/>`);
+  if (yE != null) o.push(`<rect x="${X(0)}" y="${Y(yE)}" width="${L * k}" height="${(yE - toe) * k}" class="ev-emb"/><line x1="${X(0)}" x2="${X(L)}" y1="${Y(yE)}" y2="${Y(yE)}" class="ev-exc"/>`);
+  for (let x = 0; x <= L + 1e-9; x += 1) o.push(`<line x1="${X(x)}" x2="${X(x)}" y1="${Y(top)}" y2="${Y(top) - (x % 5 ? 3 : 6)}" class="ev-tick"/>`);
+  const lev = [[top, 'top'], ...(yE != null ? [[yE, 'exc.']] : []), [toe, 'toe']];
+  for (const [y, t] of lev) o.push(`<text x="${ml - 4}" y="${Y(y) + 3}" text-anchor="end" class="ev-lev">${y.toFixed(1)}</text>`);
+  let totA = 0, totS = 0;
+  const color = { ideal: 'ev-ideal', tight: 'ev-tight', wide: 'ev-wide', over: 'ev-over', fail: 'ev-fail' };
+  for (const a of R.struts) {
+    const g = gov[a.no], r = rows[a.no]; if (!g || !r) continue;
+    const c = dzCalc(R, a, g, r.s, r.n);
+    const st = c.util != null && c.util > 1 + 1e-9 ? 'fail' : c.over ? 'over' : c.zone;
+    const n = Math.max(1, Math.floor(L / r.s + 1e-9)), off = (L - (n - 1) * r.s) / 2, y = Y(a.elev);
+    totA += n; totS += n * (c.n || 0);
+    o.push(`<line x1="${X(0)}" x2="${X(L)}" y1="${y}" y2="${y}" class="ev-waler ${color[st]}"/>`);
+    for (let i = 0; i < n; i++) o.push(`<circle cx="${X(off + i * r.s)}" cy="${y}" r="3.6" class="ev-a ${color[st]}"/>`);
+    o.push(`<text x="${ml - 4}" y="${y + 3}" text-anchor="end" class="ev-s">S${a.no}</text>`);
+    o.push(`<text x="${X(0) + 3}" y="${y - 6}" class="ev-lab">@${r.s.toFixed(2)} m · ${c.n ?? '–'} ${c.n === 1 ? T.one : T.many} · ${fF(c.T, 1)} ${u.F}${c.override ? ` · ${fx(c.incl, 0)}°` : ''}</text>`);
+  }
+  o.push(`<text x="${X(0)}" y="${H - 6}" class="ev-lev">0</text><text x="${X(L)}" y="${H - 6}" text-anchor="end" class="ev-lev">${L} m</text>`);
+  return `<svg viewBox="0 0 ${W} ${H.toFixed(0)}" class="ev" role="img" aria-label="Wall elevation, ${R.struts.length} strut rows over ${L} m">
+  <style>.ev-face{fill:var(--surface-2);stroke:var(--ink-2);stroke-width:1} .ev-emb{fill:var(--soil-2);opacity:.55} .ev-exc{stroke:var(--ink);stroke-width:1.4}
+  .ev-tick{stroke:var(--muted);stroke-width:1} .ev-lev{fill:var(--muted);font:9.5px var(--font-mono)} .ev-s{fill:var(--anchor);font:600 10px var(--font-body)}
+  .ev-lab{fill:var(--ink);font:9.5px var(--font-mono);paint-order:stroke;stroke:var(--surface-2);stroke-width:3px}
+  .ev-waler{stroke-width:1;opacity:.55} .ev-a{stroke:var(--surface);stroke-width:1}
+  .ev-ideal{fill:var(--good);stroke:var(--good)} .ev-tight{fill:#d9a400;stroke:#d9a400} .ev-wide{fill:color-mix(in srgb,var(--crit) 55%,var(--surface));stroke:color-mix(in srgb,var(--crit) 55%,var(--surface))}
+  .ev-over{fill:var(--crit);stroke:var(--crit)} .ev-fail{fill:var(--muted);stroke:var(--muted)} circle.ev-a{stroke:var(--surface)}</style>${o.join('')}</svg>
+  <p class="hint" style="margin:6px 0 0">${totA} anchors and ${totS} ${T.many} over ${L} m of wall. Colours as in the tables.</p>`;
+}
 function renderDesign(el0) {
   const R = S.R, u = U(), T = DZ_TYPES[DZ.type], ts = dzT();
   if (!R.struts.length) { el0.innerHTML = `<div class="panel"><h2>Anchor design</h2><p class="hint">This wall has no struts or anchors in the report.</p></div>`; return; }
@@ -1562,17 +1611,13 @@ function renderDesign(el0) {
     <div class="panel-head"><h2>Anchor design · ${esc(sectionName(R))}</h2><span class="hint">Choose the anchor type, then spacing and ${T.many} for each row. The row has to carry at least the force per metre from the consultant's report.</span></div>
     <div class="dz-globals">
       <div class="sel"><span id="dz-type-l">Anchor type</span><div class="seg" role="group" aria-labelledby="dz-type-l">${Object.entries(DZ_TYPES).map(([k, v]) => `<button type="button" data-type="${k}" aria-pressed="${DZ.type === k}">${v.short}</button>`).join('')}</div></div>
-      <label for="dz-break"><span>Breaking load per ${T.one} <span class="u">${u.F}</span></span><input id="dz-break" type="number" step="0.1" min="1" value="${val(ts.brk, 1)}" placeholder="${DZ.type === 'poly' ? 'from supplier' : ''}"></label>
-      <label for="dz-ratio"><span>Allowable ratio <span class="u">× breaking</span></span><input id="dz-ratio" type="number" step="0.01" min="0.1" max="1" value="${ts.ratio > 0 ? ts.ratio.toFixed(2) : ''}" placeholder="${DZ.type === 'poly' ? 'from supplier' : ''}"></label>
       <div class="dz-derived"><span>Allowable per ${T.one}</span><b id="dz-pa"></b></div>
       <label for="dz-limit"><span>Max per anchor, service <span class="u">${u.F}</span></span><input id="dz-limit" type="number" step="1" min="1" value="${val(ts.limit, 0)}"></label>
       <label for="dz-factor"><span>Factor on consultant force</span><input id="dz-factor" type="number" step="0.05" min="0.5" max="3" value="${DZ.factor.toFixed(2)}"></label>
     </div>
-    <p class="hint" style="margin:10px 0 0">${DZ.type === 'steel'
-      ? `Regular anchors: defaults are a 0.6" strand (Ø15.2 mm, 140 mm², 1860 MPa, breaking load 26.5 t) at 0.60 of breaking load, and at most ${fF(ts.limit, 0)} ${u.F} per anchor in service. Set them to your project specification.`
-      : `Polymer anchors: enter the tendon data from your supplier. The recommended maximum is ${fF(ts.limit, 0)} ${u.F} per anchor in service.`}
-      Ideal spacing between anchors is ${IDEAL_S[0]}–${IDEAL_S[1]} m.</p>
+    <p class="hint" style="margin:10px 0 0">Allowable load per ${T.one} is fixed at ${fF(ts.brk * ts.ratio, 2)} ${u.F} (0.6" ${T.one}, 0.60 of the 26.5 t breaking load, as set by the soil consultant). Recommended maximum for ${T.label.toLowerCase()} anchors: ${fF(ts.limit, 0)} ${u.F} per anchor in service. Ideal spacing between anchors is ${IDEAL_S[0]}–${IDEAL_S[1]} m.</p>
   </div>
+  <div class="dz-layout"><div class="dz-main">
   ${R.struts.map(a => { const g = gov[a.no], r = rows[a.no]; return `
   <div class="panel dcard">
     <div class="panel-head"><h2>Strut ${a.no} · ${el(a.elev)}</h2><span class="hint">${T.label} · inclination ${fx(a.incl, 1)}° · consultant modelled ${fx(a.spacing, 2)} m spacing</span></div>
@@ -1592,7 +1637,13 @@ function renderDesign(el0) {
     <h3 style="margin:18px 0 8px">Options: share of anchor capacity used</h3>
     <div class="tscroll" id="dmx-${a.no}"></div>` : `<p class="hint">The report has no force for this anchor, so there is nothing to design against.</p>`}
   </div>`; }).join('')}
-  <div class="panel"><div class="panel-head"><h2>Selected anchors</h2><span class="hint">${T.label} · your choices for ${esc(sectionName(R))}</span></div><div class="tscroll" id="dsum"></div></div>`;
+  <div class="panel"><div class="panel-head"><h2>Selected anchors</h2><span class="hint">${T.label} · your choices for ${esc(sectionName(R))}</span></div><div class="tscroll" id="dsum"></div></div>
+  </div>
+  <aside class="panel dz-side" aria-label="Wall elevation with the chosen anchor layout">
+    <div class="panel-head" style="margin-bottom:6px"><h2>Wall elevation</h2><span class="hint">Excavation face, your choices</span></div>
+    <div id="delev"></div>
+    <div class="dz-side-foot"><label for="dz-viewL" class="sel" style="flex-direction:row;align-items:center;gap:8px"><span>Length shown</span><input id="dz-viewL" type="number" step="1" min="5" max="100" value="${dzViewL(R)}"><span class="u">m</span></label></div>
+  </aside></div>`;
 
   const q = id => el0.querySelector('#' + id);
   const zoneChip = z => z === 'ideal' ? '<span class="chip good">✓ Spacing ideal</span>' : z === 'tight' ? '<span class="chip zt">Spacing under 1.5 m</span>' : '<span class="chip zw">Spacing over 2.5 m</span>';
@@ -1636,6 +1687,7 @@ function renderDesign(el0) {
       const status = (ok ? '<span class="chip good">✓ Capacity</span>' : '<span class="chip crit">✗ Increase</span>') + ' ' + (c.over ? `<span class="chip crit">Over ${lim}</span> ` : '') + zoneChip(c.zone);
       sum.push(`<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(c.incl, c.incl % 1 ? 1 : 0)}°${c.override ? ' *' : ''}</td><td>${r.s.toFixed(2)}</td><td>${c.n}</td><td class="${c.over ? 'bad' : ''}">${fF(c.T, 2)}</td><td>${fF(c.cap, 2)}</td><td class="${c.over ? 'bad' : ''}">${Math.round(c.util * 100)}%</td><td>${fF(c.Hprov, 2)}</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${status}</td></tr>`);
     }
+    q('delev').innerHTML = dzElevation(R, rows, gov);
     q('dsum').innerHTML = `<table><thead><tr><th class="l">Row</th><th>Level</th><th>Angle</th><th>Spacing<small>m</small></th><th>${T.many[0].toUpperCase() + T.many.slice(1)}</th><th>Force<small>${uu.F}/anchor</small></th><th>Capacity<small>${uu.F}/anchor</small></th><th>Used</th><th>Provided H<small>${uu.Fm}</small></th><th>Required H<small>${uu.Fm}</small></th><th>Anchors<small>per ${R.options.wallLength ?? '–'} m</small></th><th class="l">Status</th></tr></thead><tbody>${sum.join('')}</tbody></table>${R.struts.some(a => dzAngle(R, a) != null) ? '<p class="hint" style="margin:8px 0 0">* Angle set by you in Anchor design, not the consultant\'s angle. Forces are INCLINED = horizontal ÷ cos(angle).</p>' : '<p class="hint" style="margin:8px 0 0">Forces are INCLINED = horizontal force from the report ÷ cos(angle).</p>'}`;
     dzSave(R);
   };
@@ -1658,10 +1710,9 @@ function renderDesign(el0) {
     inp.addEventListener('input', () => { const v = parseFloat(inp.value); if (v >= 0 && v <= 60) { angs[a.no].deg = v; update(); } });
   }
   const g = (id, fn, needPos = true) => q(id).addEventListener('input', e => { const v = parseFloat(e.target.value); if (v > 0 || !needPos) { fn(v); update(); } });
-  g('dz-break', v => { dzT().brk = v / U().f; });
-  g('dz-ratio', v => { if (v <= 1) dzT().ratio = v; });
   g('dz-limit', v => { dzT().limit = v / U().f; });
   g('dz-factor', v => { DZ.factor = v; });
+  g('dz-viewL', v => { if (v >= 5 && v <= 100) DZ.viewL = v; });
   update();
 }
 
@@ -2130,6 +2181,6 @@ function renderStages(el0) {
 loadText(SAMPLE_TEXT, 'Example report', true);
 </script>
 
-<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-25 09:47 UTC</p>
+<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-25 09:57 UTC</p>
 </body>
 </html>
