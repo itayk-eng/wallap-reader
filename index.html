@@ -277,6 +277,10 @@ table.mx small.bad, td.bad { color: var(--crit); font-weight: 600; }
 .chip.zt { background: color-mix(in srgb, #f2c230 34%, var(--surface)); color: var(--ink); }
 .chip.zw { background: color-mix(in srgb, var(--crit) 14%, var(--surface)); color: var(--ink); }
 .warnbox { border: 1px solid var(--crit); background: color-mix(in srgb, var(--crit) 10%, var(--surface)); color: var(--ink); border-radius: var(--r); padding: 8px 10px; font-size: 13px; margin-bottom: 8px; }
+
+.dz-in .chk { font-size: 13px; color: var(--ink); }
+.dz-in input[type=number]:disabled { opacity: .5; }
+b.ovr { color: var(--anchor); font-weight: 600; }
 .foot { color: var(--muted); font-size: 12px; max-width: 80ch; }
 .anchors-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
 .acard { border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
@@ -1482,19 +1486,22 @@ const dzT = () => DZ[DZ.type];
 const dzRows = {};
 function dzKey(R) { return [R.meta.job, R.meta.runId, R.meta.title].join('|'); }
 function dzSave(R) { try { localStorage.setItem('wr-dz', JSON.stringify(DZ)); localStorage.setItem('wr-dz2:' + dzKey(R), JSON.stringify(dzRows[dzKey(R)])); } catch (e) {} }
+// angle override per strut (Anchor design only): { on, deg }
+function dzAngle(R, a) { const all = dzRows[dzKey(R)]; const o = all && all.ang && all.ang[a.no]; return o && o.on && o.deg >= 0 && o.deg < 89 ? o.deg : null; }
 function dzZone(s) { return s < IDEAL_S[0] - 1e-9 ? 'tight' : s > IDEAL_S[1] + 1e-9 ? 'wide' : 'ideal'; }
 function dzCalc(R, a, g, s, n) {
   if (!g || !(s > 0)) return null;
   const t = dzT();
-  const c = Math.cos((a.incl || 0) * Math.PI / 180);
-  const Hreq = g.perM * DZ.factor;                 // horizontal per m the row must carry
-  const Tm = Hreq / c;                              // along the anchor, per m
+  const ov = dzAngle(R, a), incl = ov != null ? ov : (a.incl || 0);
+  const c = Math.cos(incl * Math.PI / 180);
+  const Hreq = g.perM * DZ.factor;                 // horizontal per m from the report
+  const Tm = Hreq / c;                              // design force: INCLINED, along the anchor, per m
   const T = Tm * s;                                 // force per anchor
   const Pa = t.brk > 0 && t.ratio > 0 ? t.brk * t.ratio : null;   // allowable per strand/tendon
   const nMin = Pa ? Math.max(1, Math.ceil(T / Pa - 1e-9)) : null;
   const nn = n ?? nMin, cap = Pa && nn ? nn * Pa : null;
   const s0 = a.spacing || 1, Lw = R.options.wallLength;
-  return { c, Hreq, Tm, Pa, T, nMin, n: nn, cap, util: cap ? T / cap : null, Hprov: cap ? cap * c / s : null,
+  return { c, incl, override: ov != null, Hreq, Tm, Pa, T, nMin, n: nn, cap, util: cap ? T / cap : null, Hprov: cap ? cap * c / s : null,
     sMax: cap ? Math.floor(cap / Tm * 20 + 1e-9) / 20 : null,
     limit: t.limit, over: t.limit > 0 && T > t.limit + 1e-9, sLimit: t.limit > 0 ? Math.floor(t.limit / Tm * 20 + 1e-9) / 20 : null,
     zone: dzZone(s), lock: a.prestress != null ? a.prestress / s0 * s : null, count: Lw ? Math.ceil(Lw / s - 1e-9) : null, stage: g.stage };
@@ -1507,6 +1514,8 @@ function dzGet(R) {
     dzRows[key] = saved || {};
   }
   const all = dzRows[key]; const rows = all[DZ.type] || (all[DZ.type] = {});
+  if (!all.ang) all.ang = {};
+  for (const a of R.struts) if (!all.ang[a.no]) all.ang[a.no] = { on: false, deg: a.incl || 0 };
   const gov = govAnchors(R);
   for (const a of R.struts) if (!rows[a.no] || !(rows[a.no].s > 0)) { const s0 = a.spacing || 1; const c = dzCalc(R, a, gov[a.no], s0, null); rows[a.no] = { s: s0, n: c && c.nMin ? c.nMin : 2 }; }
   return rows;
@@ -1533,6 +1542,7 @@ function dzMatrix(R, a, g, row) {
     const why = !ok ? 'not enough capacity' : c.over ? `over ${fF(c.limit, 0)} ${u.F} per anchor` : `spacing ${zoneTxt[c.zone]}`;
     return `<td><button type="button" class="${cls}" data-mx="${a.no}" data-s="${s}" data-n="${n}" title="${why}" aria-label="${s.toFixed(2)} m spacing, ${n} ${t.many}, ${Math.round(util * 100)}% used, ${why}">${star}${Math.round(util * 100)}%</button></td>`; }).join('')}</tr>`; }).join('')}
   </tbody></table>
+  ${rec ? '' : `<div class="warnbox" style="margin-top:8px">No option in the ideal zone: at ${fF(lo.Tm, 2)} ${u.Fm} INCLINED, ${fF(dzT().limit, 0)} ${u.F} per anchor is reached at ${sLim != null ? sLim.toFixed(2) : '–'} m spacing${sLim != null && sLim < IDEAL_S[0] ? `, below the ${IDEAL_S[0]} m ideal minimum` : ''}. Choose closer spacing (yellow) or another anchor type.</div>`}
   <div class="legend" style="margin-top:8px">
     <span><span class="swatch mx-sw ideal"></span>Ideal: ${IDEAL_S[0]}–${IDEAL_S[1]} m spacing, up to ${fF(dzT().limit, 0)} ${u.F} per anchor</span>
     <span><span class="swatch mx-sw tight"></span>Spacing under ${IDEAL_S[0]} m</span>
@@ -1545,7 +1555,7 @@ function dzMatrix(R, a, g, row) {
 function renderDesign(el0) {
   const R = S.R, u = U(), T = DZ_TYPES[DZ.type], ts = dzT();
   if (!R.struts.length) { el0.innerHTML = `<div class="panel"><h2>Anchor design</h2><p class="hint">This wall has no struts or anchors in the report.</p></div>`; return; }
-  const rows = dzGet(R), gov = govAnchors(R);
+  const rows = dzGet(R), gov = govAnchors(R), angs = dzRows[dzKey(R)].ang;
   const val = (v, d) => v > 0 ? (v * u.f).toFixed(d) : '';
   el0.innerHTML = `
   <div class="panel">
@@ -1567,13 +1577,15 @@ function renderDesign(el0) {
   <div class="panel dcard">
     <div class="panel-head"><h2>Strut ${a.no} · ${el(a.elev)}</h2><span class="hint">${T.label} · inclination ${fx(a.incl, 1)}° · consultant modelled ${fx(a.spacing, 2)} m spacing</span></div>
     ${g ? `<div class="dz-grid">
-      <div class="dz-req"><div class="k-label">Required by the consultant</div><div class="big" id="dreq-${a.no}"></div><div class="hint" id="dreqs-${a.no}"></div></div>
+      <div class="dz-req"><div class="k-label">Design force (INCLINED)</div><div class="big" id="dreq-${a.no}"></div><div class="hint" id="dreqs-${a.no}"></div></div>
       <div class="dz-in">
         <label for="ds-${a.no}">Spacing <span class="u">m</span></label>
         <div class="inrow"><button type="button" data-step="s" data-d="-0.05" data-no="${a.no}" aria-label="Decrease spacing">−</button><input id="ds-${a.no}" type="number" step="0.05" min="0.3" max="6" value="${r.s.toFixed(2)}"><button type="button" data-step="s" data-d="0.05" data-no="${a.no}" aria-label="Increase spacing">+</button></div>
         <input id="dsr-${a.no}" type="range" min="0.5" max="4" step="0.05" value="${r.s}" aria-label="Spacing">
         <label for="dn-${a.no}" style="margin-top:6px">${T.many[0].toUpperCase() + T.many.slice(1)} per anchor</label>
         <div class="inrow"><button type="button" data-step="n" data-d="-1" data-no="${a.no}" aria-label="Fewer ${T.many}">−</button><input id="dn-${a.no}" type="number" step="1" min="1" max="30" value="${r.n}"><button type="button" data-step="n" data-d="1" data-no="${a.no}" aria-label="More ${T.many}">+</button><button type="button" class="link" data-min="${a.no}">Use minimum</button></div>
+        <label class="chk" for="dao-${a.no}" style="margin-top:10px"><input type="checkbox" id="dao-${a.no}" ${angs[a.no].on ? 'checked' : ''}> Override anchor angle</label>
+        <div class="inrow"><input id="dad-${a.no}" type="number" step="0.5" min="0" max="60" value="${angs[a.no].deg}" ${angs[a.no].on ? '' : 'disabled'} aria-label="Anchor angle from horizontal, degrees"><span class="u">° from horizontal · consultant ${fx(a.incl || 0, 1)}°</span></div>
       </div>
       <div class="dz-out" id="dout-${a.no}"></div>
     </div>
@@ -1591,15 +1603,15 @@ function renderDesign(el0) {
     for (const a of R.struts) {
       const g = gov[a.no]; if (!g) continue;
       const r = rows[a.no], c = dzCalc(R, a, g, r.s, r.n);
-      q('dreq-' + a.no).innerHTML = `${fF(c.Hreq, 2)}<span>${uu.Fm} horizontal</span>`;
-      q('dreqs-' + a.no).innerHTML = `${fF(c.Tm, 2)} ${uu.Fm} along the anchor · governing stage ${g.stage}${DZ.factor !== 1 ? ` · includes ×${DZ.factor.toFixed(2)}` : ''}`;
+      q('dreq-' + a.no).innerHTML = `${fF(c.Tm, 2)}<span>${uu.Fm} INCLINED</span>`;
+      q('dreqs-' + a.no).innerHTML = `= ${fF(c.Hreq, 2)} ${uu.Fm} horizontal ÷ cos ${fx(c.incl, c.incl % 1 ? 1 : 0)}°${c.override ? ` <b class="ovr">your angle (consultant ${fx(a.incl || 0, c.incl % 1 ? 1 : 0)}°)</b>` : ''} · governing stage ${g.stage}${DZ.factor !== 1 ? ` · includes ×${DZ.factor.toFixed(2)}` : ''}`;
       const lim = `${fF(c.limit, 0)} ${uu.F}`;
       if (!c.Pa) {
         q('dout-' + a.no).innerHTML = `<div class="verdict">Enter the polymer ${T.one} data above</div>
-          <div class="keys"><div><span>Force per anchor</span><b class="${c.over ? 'bad' : ''}">${fF(c.T, 2)} ${uu.F}</b></div>
+          <div class="keys"><div><span>Force per anchor (INCLINED)</span><b class="${c.over ? 'bad' : ''}">${fF(c.T, 2)} ${uu.F}</b></div>
           <div><span>Max per anchor, service</span><b>${lim}</b></div><div><span>Widest spacing within ${lim}</span><b>${c.sLimit != null ? c.sLimit.toFixed(2) + ' m' : '–'}</b></div></div>`;
         q('dmx-' + a.no).innerHTML = dzMatrix(R, a, g, r);
-        sum.push(`<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.incl, 0)}°</td><td>${r.s.toFixed(2)}</td><td>–</td><td class="${c.over ? 'bad' : ''}">${fF(c.T, 2)}</td><td>–</td><td>–</td><td>–</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${c.over ? `<span class="chip crit">Over ${lim}</span> ` : ''}${zoneChip(c.zone)}</td></tr>`);
+        sum.push(`<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(c.incl, c.incl % 1 ? 1 : 0)}°${c.override ? ' *' : ''}</td><td>${r.s.toFixed(2)}</td><td>–</td><td class="${c.over ? 'bad' : ''}">${fF(c.T, 2)}</td><td>–</td><td>–</td><td>–</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${c.over ? `<span class="chip crit">Over ${lim}</span> ` : ''}${zoneChip(c.zone)}</td></tr>`);
         continue;
       }
       const ok = c.util <= 1 + 1e-9;
@@ -1610,7 +1622,7 @@ function renderDesign(el0) {
       q('dout-' + a.no).innerHTML = `${verdict}
         <div class="meter${ok && !c.over ? '' : ' over'}" role="img" aria-label="${Math.round(c.util * 100)}% of capacity used"><i style="width:${Math.min(100, c.util * 100).toFixed(1)}%"></i></div>
         <div class="keys">
-          <div><span>Force per anchor</span><b class="${c.over ? 'bad' : ''}">${fF(c.T, 2)} ${uu.F}${c.over ? ` > ${lim}` : ''}</b></div>
+          <div><span>Force per anchor (INCLINED)</span><b class="${c.over ? 'bad' : ''}">${fF(c.T, 2)} ${uu.F}${c.over ? ` > ${lim}` : ''}</b></div>
           <div><span>Anchor capacity (${c.n} × ${fF(c.Pa, 2)})</span><b>${fF(c.cap, 2)} ${uu.F}</b></div>
           <div><span>Capacity used</span><b class="${c.over ? 'bad' : ''}">${Math.round(c.util * 100)}%</b></div>
           <div><span>Provided per m, horizontal</span><b class="${ok ? '' : 'bad'}">${fF(c.Hprov, 2)} ${ok ? '≥' : '<'} ${fF(c.Hreq, 2)} ${uu.Fm}</b></div>
@@ -1622,9 +1634,9 @@ function renderDesign(el0) {
         </div>`;
       q('dmx-' + a.no).innerHTML = dzMatrix(R, a, g, r);
       const status = (ok ? '<span class="chip good">✓ Capacity</span>' : '<span class="chip crit">✗ Increase</span>') + ' ' + (c.over ? `<span class="chip crit">Over ${lim}</span> ` : '') + zoneChip(c.zone);
-      sum.push(`<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.incl, 0)}°</td><td>${r.s.toFixed(2)}</td><td>${c.n}</td><td class="${c.over ? 'bad' : ''}">${fF(c.T, 2)}</td><td>${fF(c.cap, 2)}</td><td class="${c.over ? 'bad' : ''}">${Math.round(c.util * 100)}%</td><td>${fF(c.Hprov, 2)}</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${status}</td></tr>`);
+      sum.push(`<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(c.incl, c.incl % 1 ? 1 : 0)}°${c.override ? ' *' : ''}</td><td>${r.s.toFixed(2)}</td><td>${c.n}</td><td class="${c.over ? 'bad' : ''}">${fF(c.T, 2)}</td><td>${fF(c.cap, 2)}</td><td class="${c.over ? 'bad' : ''}">${Math.round(c.util * 100)}%</td><td>${fF(c.Hprov, 2)}</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${status}</td></tr>`);
     }
-    q('dsum').innerHTML = `<table><thead><tr><th class="l">Row</th><th>Level</th><th>Incl.</th><th>Spacing<small>m</small></th><th>${T.many[0].toUpperCase() + T.many.slice(1)}</th><th>Force<small>${uu.F}/anchor</small></th><th>Capacity<small>${uu.F}/anchor</small></th><th>Used</th><th>Provided H<small>${uu.Fm}</small></th><th>Required H<small>${uu.Fm}</small></th><th>Anchors<small>per ${R.options.wallLength ?? '–'} m</small></th><th class="l">Status</th></tr></thead><tbody>${sum.join('')}</tbody></table>`;
+    q('dsum').innerHTML = `<table><thead><tr><th class="l">Row</th><th>Level</th><th>Angle</th><th>Spacing<small>m</small></th><th>${T.many[0].toUpperCase() + T.many.slice(1)}</th><th>Force<small>${uu.F}/anchor</small></th><th>Capacity<small>${uu.F}/anchor</small></th><th>Used</th><th>Provided H<small>${uu.Fm}</small></th><th>Required H<small>${uu.Fm}</small></th><th>Anchors<small>per ${R.options.wallLength ?? '–'} m</small></th><th class="l">Status</th></tr></thead><tbody>${sum.join('')}</tbody></table>${R.struts.some(a => dzAngle(R, a) != null) ? '<p class="hint" style="margin:8px 0 0">* Angle set by you in Anchor design, not the consultant\'s angle. Forces are INCLINED = horizontal ÷ cos(angle).</p>' : '<p class="hint" style="margin:8px 0 0">Forces are INCLINED = horizontal force from the report ÷ cos(angle).</p>'}`;
     dzSave(R);
   };
   const setS = (no, v, from) => { if (!(v >= 0.3 && v <= 10)) return; rows[no].s = Math.round(v * 100) / 100; if (from !== 'num') q('ds-' + no).value = rows[no].s.toFixed(2); if (from !== 'range') q('dsr-' + no).value = rows[no].s; update(); };
@@ -1639,6 +1651,12 @@ function renderDesign(el0) {
   el0.querySelectorAll('[data-min]').forEach(b => b.onclick = () => { const no = +b.dataset.min; const a = R.struts.find(x => x.no === no); const c = dzCalc(R, a, gov[no], rows[no].s, null); if (c && c.nMin) setN(no, c.nMin); });
   el0.addEventListener('click', e => { const b = e.target.closest('[data-mx]'); if (!b) return; const no = +b.dataset.mx; rows[no].s = +b.dataset.s; q('ds-' + no).value = rows[no].s.toFixed(2); q('dsr-' + no).value = rows[no].s; setN(no, +b.dataset.n); });
   el0.querySelectorAll('[data-type]').forEach(b => b.onclick = () => { DZ.type = b.dataset.type; dzSave(R); render(); });
+  for (const a of R.struts) {
+    if (!gov[a.no]) continue;
+    const cb = q('dao-' + a.no), inp = q('dad-' + a.no);
+    cb.addEventListener('change', () => { angs[a.no].on = cb.checked; inp.disabled = !cb.checked; if (cb.checked) inp.focus(); update(); });
+    inp.addEventListener('input', () => { const v = parseFloat(inp.value); if (v >= 0 && v <= 60) { angs[a.no].deg = v; update(); } });
+  }
   const g = (id, fn, needPos = true) => q(id).addEventListener('input', e => { const v = parseFloat(e.target.value); if (v > 0 || !needPos) { fn(v); update(); } });
   g('dz-break', v => { dzT().brk = v / U().f; });
   g('dz-ratio', v => { if (v <= 1) dzT().ratio = v; });
@@ -2112,6 +2130,6 @@ function renderStages(el0) {
 loadText(SAMPLE_TEXT, 'Example report', true);
 </script>
 
-<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-25 09:38 UTC</p>
+<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-25 09:47 UTC</p>
 </body>
 </html>
