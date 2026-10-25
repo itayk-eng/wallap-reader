@@ -32,6 +32,7 @@
   --soil-1: #ece3cf; --soil-2: #dccca6; --soil-3: #c9b387; --soil-4: #b39a6c;
   --soil-line: #a8977a;
   --good: #0ca30c; --warn: #b77a00; --crit: #d03b3b;
+  --tight-ink: #8a6700;
   --font-display: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
   --font-body: "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -42,13 +43,13 @@
   --line: #333b3d; --grid: #283032; --accent: #6fb0dd; --accent-ink: #0d1a22; --accent-soft: #1d3342;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --water: #4f98ec; --anchor: #ef7a45; --wall: #dfe6e6;
   --soil-1: #36312a; --soil-2: #423a2d; --soil-3: #4f4432; --soil-4: #5c4f38; --soil-line: #6f6350;
-  --good: #2fbf2f; --warn: #e0a326; --crit: #e66767; color-scheme: dark; } }
+  --good: #2fbf2f; --warn: #e0a326; --crit: #e66767; --tight-ink: #e8c040; color-scheme: dark; } }
 :root[data-theme="dark"] {
   --bg: #121617; --surface: #1a1f21; --surface-2: #222829; --ink: #eef2f1; --ink-2: #b9c3c4; --muted: #8b979a;
   --line: #333b3d; --grid: #283032; --accent: #6fb0dd; --accent-ink: #0d1a22; --accent-soft: #1d3342;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --water: #4f98ec; --anchor: #ef7a45; --wall: #dfe6e6;
   --soil-1: #36312a; --soil-2: #423a2d; --soil-3: #4f4432; --soil-4: #5c4f38; --soil-line: #6f6350;
-  --good: #2fbf2f; --warn: #e0a326; --crit: #e66767; color-scheme: dark; }
+  --good: #2fbf2f; --warn: #e0a326; --crit: #e66767; --tight-ink: #e8c040; color-scheme: dark; }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -264,6 +265,18 @@ select:focus-visible, label.chk input:focus-visible { outline: 2px solid var(--a
 
 .seg.sm button { padding: 6px 8px; font-size: 12px; }
 .exp-quick { align-items: center; flex-wrap: wrap; }
+
+.mx-cell.ideal, .mx-sw.ideal { background: color-mix(in srgb, var(--good) 18%, var(--surface)); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); color: var(--ink); }
+.mx-cell.tight, .mx-sw.tight { background: color-mix(in srgb, #f2c230 34%, var(--surface)); border-color: color-mix(in srgb, #d9a400 55%, var(--line)); color: var(--ink); }
+.mx-cell.wide, .mx-sw.wide { background: color-mix(in srgb, var(--crit) 14%, var(--surface)); border-color: color-mix(in srgb, var(--crit) 32%, var(--line)); color: var(--ink); }
+.mx-cell.over, .mx-sw.over { background: color-mix(in srgb, var(--crit) 55%, var(--surface)); border-color: var(--crit); color: var(--ink); font-weight: 700; }
+.zdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.zdot.ideal { background: var(--good); } .zdot.tight { background: #e0b000; } .zdot.wide { background: color-mix(in srgb, var(--crit) 55%, var(--surface)); }
+table.mx small.bad, td.bad { color: var(--crit); font-weight: 600; }
+.verdict.zt { color: var(--tight-ink); } .verdict.zw { color: var(--crit); }
+.chip.zt { background: color-mix(in srgb, #f2c230 34%, var(--surface)); color: var(--ink); }
+.chip.zw { background: color-mix(in srgb, var(--crit) 14%, var(--surface)); color: var(--ink); }
+.warnbox { border: 1px solid var(--crit); background: color-mix(in srgb, var(--crit) 10%, var(--surface)); color: var(--ink); border-radius: var(--r); padding: 8px 10px; font-size: 13px; margin-bottom: 8px; }
 .foot { color: var(--muted); font-size: 12px; max-width: 80ch; }
 .anchors-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
 .acard { border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
@@ -1448,111 +1461,170 @@ function elevationSVG(R, gov, name) {
 }
 
 // ---------- ANCHOR DESIGN
-const DZ = { strandBreak: 26.5, ratio: 0.6, factor: 1.0 };   // strandBreak in tonnes
-try { const g = JSON.parse(localStorage.getItem('wr-dz') || 'null'); if (g && g.strandBreak > 0) Object.assign(DZ, g); } catch (e) {}
+// Two anchor types with their own element data and recommended service limit per anchor.
+const DZ_TYPES = {
+  steel: { label: 'Regular (steel strands)', short: 'Regular', one: 'strand', many: 'strands' },
+  poly: { label: 'Polymer', short: 'Polymer', one: 'tendon', many: 'tendons' },
+};
+const IDEAL_S = [1.5, 2.5];   // ideal spacing range, m
+const DZ = { type: 'steel', factor: 1.0,
+  steel: { brk: 26.5, ratio: 0.6, limit: 60 },      // tonnes
+  poly: { brk: null, ratio: null, limit: 45 } };    // polymer element data comes from the supplier
+try {
+  const g = JSON.parse(localStorage.getItem('wr-dz') || 'null');
+  if (g) {
+    if (g.steel || g.poly) { Object.assign(DZ.steel, g.steel || {}); Object.assign(DZ.poly, g.poly || {}); if (g.type in DZ_TYPES) DZ.type = g.type; }
+    else if (g.strandBreak > 0) { DZ.steel.brk = g.strandBreak; DZ.steel.ratio = g.ratio || 0.6; }   // older saved settings
+    if (g.factor > 0) DZ.factor = g.factor;
+  }
+} catch (e) {}
+const dzT = () => DZ[DZ.type];
 const dzRows = {};
 function dzKey(R) { return [R.meta.job, R.meta.runId, R.meta.title].join('|'); }
-function dzSave(R) { try { localStorage.setItem('wr-dz', JSON.stringify(DZ)); localStorage.setItem('wr-dz:' + dzKey(R), JSON.stringify(dzRows[dzKey(R)])); } catch (e) {} }
+function dzSave(R) { try { localStorage.setItem('wr-dz', JSON.stringify(DZ)); localStorage.setItem('wr-dz2:' + dzKey(R), JSON.stringify(dzRows[dzKey(R)])); } catch (e) {} }
+function dzZone(s) { return s < IDEAL_S[0] - 1e-9 ? 'tight' : s > IDEAL_S[1] + 1e-9 ? 'wide' : 'ideal'; }
 function dzCalc(R, a, g, s, n) {
   if (!g || !(s > 0)) return null;
+  const t = dzT();
   const c = Math.cos((a.incl || 0) * Math.PI / 180);
   const Hreq = g.perM * DZ.factor;                 // horizontal per m the row must carry
   const Tm = Hreq / c;                              // along the anchor, per m
-  const Pa = DZ.strandBreak * DZ.ratio;             // allowable per strand
   const T = Tm * s;                                 // force per anchor
-  const nMin = Math.max(1, Math.ceil(T / Pa - 1e-9));
-  const nn = n ?? nMin, cap = nn * Pa;
+  const Pa = t.brk > 0 && t.ratio > 0 ? t.brk * t.ratio : null;   // allowable per strand/tendon
+  const nMin = Pa ? Math.max(1, Math.ceil(T / Pa - 1e-9)) : null;
+  const nn = n ?? nMin, cap = Pa && nn ? nn * Pa : null;
   const s0 = a.spacing || 1, Lw = R.options.wallLength;
-  return { c, Hreq, Tm, Pa, T, nMin, n: nn, cap, util: T / cap, Hprov: cap * c / s, sMax: Math.floor(nn * Pa / Tm * 20 + 1e-9) / 20,
-    lock: a.prestress != null ? a.prestress / s0 * s : null, count: Lw ? Math.ceil(Lw / s - 1e-9) : null, stage: g.stage };
+  return { c, Hreq, Tm, Pa, T, nMin, n: nn, cap, util: cap ? T / cap : null, Hprov: cap ? cap * c / s : null,
+    sMax: cap ? Math.floor(cap / Tm * 20 + 1e-9) / 20 : null,
+    limit: t.limit, over: t.limit > 0 && T > t.limit + 1e-9, sLimit: t.limit > 0 ? Math.floor(t.limit / Tm * 20 + 1e-9) / 20 : null,
+    zone: dzZone(s), lock: a.prestress != null ? a.prestress / s0 * s : null, count: Lw ? Math.ceil(Lw / s - 1e-9) : null, stage: g.stage };
 }
 function dzGet(R) {
   const key = dzKey(R);
-  if (!dzRows[key]) { let saved = null; try { saved = JSON.parse(localStorage.getItem('wr-dz:' + key) || 'null'); } catch (e) {} dzRows[key] = saved || {}; }
-  const rows = dzRows[key], gov = govAnchors(R);
-  for (const a of R.struts) if (!rows[a.no] || !(rows[a.no].s > 0) || !(rows[a.no].n >= 1)) { const s0 = a.spacing || 1; const c = dzCalc(R, a, gov[a.no], s0, null); rows[a.no] = { s: s0, n: c ? c.nMin : 2 }; }
+  if (!dzRows[key]) {
+    let saved = null; try { saved = JSON.parse(localStorage.getItem('wr-dz2:' + key) || 'null'); } catch (e) {}
+    if (!saved) { try { const old = JSON.parse(localStorage.getItem('wr-dz:' + key) || 'null'); if (old) saved = { steel: old }; } catch (e) {} }
+    dzRows[key] = saved || {};
+  }
+  const all = dzRows[key]; const rows = all[DZ.type] || (all[DZ.type] = {});
+  const gov = govAnchors(R);
+  for (const a of R.struts) if (!rows[a.no] || !(rows[a.no].s > 0)) { const s0 = a.spacing || 1; const c = dzCalc(R, a, gov[a.no], s0, null); rows[a.no] = { s: s0, n: c && c.nMin ? c.nMin : 2 }; }
   return rows;
 }
 function dzMatrix(R, a, g, row) {
-  const u = U();
+  const u = U(), t = DZ_TYPES[DZ.type];
   const base = [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3];
-  const sp = [...new Set([...base, a.spacing || 1, row.s].map(v => Math.round(v * 100) / 100))].sort((x, y) => x - y);
+  const sLim = dzCalc(R, a, g, 1, null).sLimit;   // widest spacing within the service limit
+  const sp = [...new Set([...base, a.spacing || 1, row.s, ...(sLim > 0.5 && sLim < 3.5 ? [sLim] : [])].map(v => Math.round(v * 100) / 100))].sort((x, y) => x - y);
   const lo = dzCalc(R, a, g, sp[0], null), hi = dzCalc(R, a, g, sp[sp.length - 1], null);
+  if (!lo.Pa) return `<p class="hint">Enter the polymer ${t.one}'s breaking load and allowable ratio above to see the options.</p>`;
   const n0 = Math.max(1, lo.nMin - 1), n1 = Math.min(30, Math.max(hi.nMin + 1, n0 + 5));
   const ns = []; for (let n = n0; n <= n1; n++) ns.push(n);
-  let eco = null;
-  for (const s of sp) { const c = dzCalc(R, a, g, s, null); const r = c.nMin / s; if (c.nMin <= n1 && (!eco || r < eco.r - 1e-9 || (Math.abs(r - eco.r) < 1e-9 && s > eco.s))) eco = { s, n: c.nMin, r }; }
-  return `<table class="mx"><thead><tr><th class="l">Spacing<small>force / anchor</small></th>${ns.map(n => `<th>${n} strand${n > 1 ? 's' : ''}<small>${fF(n * lo.Pa, 1)} ${u.F}</small></th>`).join('')}</tr></thead><tbody>
-  ${sp.map(s => { const c = dzCalc(R, a, g, s, null); return `<tr><th class="l">${s.toFixed(2)} m<small>${fF(c.T, 1)} ${u.F}</small></th>${ns.map(n => {
+  // recommended: in the ideal spacing range, within the service limit, fewest strands per metre of wall
+  let rec = null;
+  for (const s of sp) { const c = dzCalc(R, a, g, s, null); if (c.zone !== 'ideal' || c.over || c.nMin > n1) continue; const r = c.nMin / s; if (!rec || r < rec.r - 1e-9 || (Math.abs(r - rec.r) < 1e-9 && s > rec.s)) rec = { s, n: c.nMin, r }; }
+  const zoneTxt = { tight: 'under 1.5 m', ideal: 'ideal', wide: 'over 2.5 m' };
+  return `<table class="mx"><thead><tr><th class="l">Spacing<small>force / anchor</small></th>${ns.map(n => `<th>${n} ${n > 1 ? t.many : t.one}<small>${fF(n * lo.Pa, 1)} ${u.F}</small></th>`).join('')}</tr></thead><tbody>
+  ${sp.map(s => { const c = dzCalc(R, a, g, s, null); return `<tr><th class="l"><span class="zdot ${c.zone}" title="${zoneTxt[c.zone]}"></span>${s.toFixed(2)} m<small class="${c.over ? 'bad' : ''}">${fF(c.T, 1)} ${u.F}${c.over ? ' !' : ''}</small></th>${ns.map(n => {
     const util = c.T / (n * c.Pa), ok = util <= 1 + 1e-9;
-    const cls = ['mx-cell', ok ? 'ok' : 'fail', n === c.nMin ? 'first' : '', Math.abs(s - row.s) < 1e-6 && n === row.n ? 'sel' : ''].join(' ');
-    const star = eco && Math.abs(eco.s - s) < 1e-6 && eco.n === n ? '★ ' : '';
-    return `<td><button type="button" class="${cls}" data-mx="${a.no}" data-s="${s}" data-n="${n}" aria-label="${s.toFixed(2)} m spacing, ${n} strands, ${Math.round(util * 100)}% used">${star}${ok ? '' : ''}${Math.round(util * 100)}%</button></td>`; }).join('')}</tr>`; }).join('')}
+    const state = !ok ? 'fail' : c.over ? 'over' : c.zone;
+    const cls = ['mx-cell', state, n === c.nMin ? 'first' : '', Math.abs(s - row.s) < 1e-6 && n === row.n ? 'sel' : ''].join(' ');
+    const star = rec && Math.abs(rec.s - s) < 1e-6 && rec.n === n ? '★ ' : '';
+    const why = !ok ? 'not enough capacity' : c.over ? `over ${fF(c.limit, 0)} ${u.F} per anchor` : `spacing ${zoneTxt[c.zone]}`;
+    return `<td><button type="button" class="${cls}" data-mx="${a.no}" data-s="${s}" data-n="${n}" title="${why}" aria-label="${s.toFixed(2)} m spacing, ${n} ${t.many}, ${Math.round(util * 100)}% used, ${why}">${star}${Math.round(util * 100)}%</button></td>`; }).join('')}</tr>`; }).join('')}
   </tbody></table>
-  <div class="legend" style="margin-top:8px"><span><span class="swatch mx-sw ok"></span>Carries the consultant's force</span><span><span class="swatch mx-sw fail"></span>Not enough</span><span><b>Bold</b> = fewest strands at that spacing</span><span>★ fewest strands per metre of wall</span><span>Outlined = your choice. Click a cell to choose it.</span></div>`;
+  <div class="legend" style="margin-top:8px">
+    <span><span class="swatch mx-sw ideal"></span>Ideal: ${IDEAL_S[0]}–${IDEAL_S[1]} m spacing, up to ${fF(dzT().limit, 0)} ${u.F} per anchor</span>
+    <span><span class="swatch mx-sw tight"></span>Spacing under ${IDEAL_S[0]} m</span>
+    <span><span class="swatch mx-sw wide"></span>Spacing over ${IDEAL_S[1]} m</span>
+    <span><span class="swatch mx-sw over"></span>Over ${fF(dzT().limit, 0)} ${u.F} per anchor (not recommended in service)</span>
+    <span><span class="swatch mx-sw fail"></span>Not enough capacity</span>
+  </div>
+  <div class="legend" style="margin-top:4px"><span><b>Bold</b> = fewest ${t.many} at that spacing</span><span>★ recommended: ideal zone with the fewest ${t.many} per metre of wall</span><span>Outlined = your choice. Click a cell to choose it.</span></div>`;
 }
 function renderDesign(el0) {
-  const R = S.R, u = U();
+  const R = S.R, u = U(), T = DZ_TYPES[DZ.type], ts = dzT();
   if (!R.struts.length) { el0.innerHTML = `<div class="panel"><h2>Anchor design</h2><p class="hint">This wall has no struts or anchors in the report.</p></div>`; return; }
   const rows = dzGet(R), gov = govAnchors(R);
+  const val = (v, d) => v > 0 ? (v * u.f).toFixed(d) : '';
   el0.innerHTML = `
   <div class="panel">
-    <div class="panel-head"><h2>Anchor design · ${esc(sectionName(R))}</h2><span class="hint">Choose spacing and strands for each row. The row has to carry at least the force per metre from the consultant's report.</span></div>
+    <div class="panel-head"><h2>Anchor design · ${esc(sectionName(R))}</h2><span class="hint">Choose the anchor type, then spacing and ${T.many} for each row. The row has to carry at least the force per metre from the consultant's report.</span></div>
     <div class="dz-globals">
-      <label for="dz-break"><span>Breaking load per strand <span class="u">${u.F}</span></span><input id="dz-break" type="number" step="0.1" min="1" value="${(DZ.strandBreak * u.f).toFixed(1)}"></label>
-      <label for="dz-ratio"><span>Allowable ratio <span class="u">× breaking</span></span><input id="dz-ratio" type="number" step="0.01" min="0.1" max="1" value="${DZ.ratio.toFixed(2)}"></label>
-      <div class="dz-derived"><span>Allowable per strand</span><b id="dz-pa"></b></div>
+      <div class="sel"><span id="dz-type-l">Anchor type</span><div class="seg" role="group" aria-labelledby="dz-type-l">${Object.entries(DZ_TYPES).map(([k, v]) => `<button type="button" data-type="${k}" aria-pressed="${DZ.type === k}">${v.short}</button>`).join('')}</div></div>
+      <label for="dz-break"><span>Breaking load per ${T.one} <span class="u">${u.F}</span></span><input id="dz-break" type="number" step="0.1" min="1" value="${val(ts.brk, 1)}" placeholder="${DZ.type === 'poly' ? 'from supplier' : ''}"></label>
+      <label for="dz-ratio"><span>Allowable ratio <span class="u">× breaking</span></span><input id="dz-ratio" type="number" step="0.01" min="0.1" max="1" value="${ts.ratio > 0 ? ts.ratio.toFixed(2) : ''}" placeholder="${DZ.type === 'poly' ? 'from supplier' : ''}"></label>
+      <div class="dz-derived"><span>Allowable per ${T.one}</span><b id="dz-pa"></b></div>
+      <label for="dz-limit"><span>Max per anchor, service <span class="u">${u.F}</span></span><input id="dz-limit" type="number" step="1" min="1" value="${val(ts.limit, 0)}"></label>
       <label for="dz-factor"><span>Factor on consultant force</span><input id="dz-factor" type="number" step="0.05" min="0.5" max="3" value="${DZ.factor.toFixed(2)}"></label>
     </div>
-    <p class="hint" style="margin:10px 0 0">Defaults are a 0.6" strand (Ø15.2 mm, 140 mm², 1860 MPa, breaking load 26.5 t) used at 0.60 of breaking load. Set them to your project specification.</p>
+    <p class="hint" style="margin:10px 0 0">${DZ.type === 'steel'
+      ? `Regular anchors: defaults are a 0.6" strand (Ø15.2 mm, 140 mm², 1860 MPa, breaking load 26.5 t) at 0.60 of breaking load, and at most ${fF(ts.limit, 0)} ${u.F} per anchor in service. Set them to your project specification.`
+      : `Polymer anchors: enter the tendon data from your supplier. The recommended maximum is ${fF(ts.limit, 0)} ${u.F} per anchor in service.`}
+      Ideal spacing between anchors is ${IDEAL_S[0]}–${IDEAL_S[1]} m.</p>
   </div>
   ${R.struts.map(a => { const g = gov[a.no], r = rows[a.no]; return `
   <div class="panel dcard">
-    <div class="panel-head"><h2>Strut ${a.no} · ${el(a.elev)}</h2><span class="hint">Inclination ${fx(a.incl, 1)}° · consultant modelled ${fx(a.spacing, 2)} m spacing</span></div>
+    <div class="panel-head"><h2>Strut ${a.no} · ${el(a.elev)}</h2><span class="hint">${T.label} · inclination ${fx(a.incl, 1)}° · consultant modelled ${fx(a.spacing, 2)} m spacing</span></div>
     ${g ? `<div class="dz-grid">
       <div class="dz-req"><div class="k-label">Required by the consultant</div><div class="big" id="dreq-${a.no}"></div><div class="hint" id="dreqs-${a.no}"></div></div>
       <div class="dz-in">
         <label for="ds-${a.no}">Spacing <span class="u">m</span></label>
         <div class="inrow"><button type="button" data-step="s" data-d="-0.05" data-no="${a.no}" aria-label="Decrease spacing">−</button><input id="ds-${a.no}" type="number" step="0.05" min="0.3" max="6" value="${r.s.toFixed(2)}"><button type="button" data-step="s" data-d="0.05" data-no="${a.no}" aria-label="Increase spacing">+</button></div>
         <input id="dsr-${a.no}" type="range" min="0.5" max="4" step="0.05" value="${r.s}" aria-label="Spacing">
-        <label for="dn-${a.no}" style="margin-top:6px">Strands per anchor</label>
-        <div class="inrow"><button type="button" data-step="n" data-d="-1" data-no="${a.no}" aria-label="Fewer strands">−</button><input id="dn-${a.no}" type="number" step="1" min="1" max="30" value="${r.n}"><button type="button" data-step="n" data-d="1" data-no="${a.no}" aria-label="More strands">+</button><button type="button" class="link" data-min="${a.no}">Use minimum</button></div>
+        <label for="dn-${a.no}" style="margin-top:6px">${T.many[0].toUpperCase() + T.many.slice(1)} per anchor</label>
+        <div class="inrow"><button type="button" data-step="n" data-d="-1" data-no="${a.no}" aria-label="Fewer ${T.many}">−</button><input id="dn-${a.no}" type="number" step="1" min="1" max="30" value="${r.n}"><button type="button" data-step="n" data-d="1" data-no="${a.no}" aria-label="More ${T.many}">+</button><button type="button" class="link" data-min="${a.no}">Use minimum</button></div>
       </div>
       <div class="dz-out" id="dout-${a.no}"></div>
     </div>
     <h3 style="margin:18px 0 8px">Options: share of anchor capacity used</h3>
     <div class="tscroll" id="dmx-${a.no}"></div>` : `<p class="hint">The report has no force for this anchor, so there is nothing to design against.</p>`}
   </div>`; }).join('')}
-  <div class="panel"><div class="panel-head"><h2>Selected anchors</h2><span class="hint">Your choices for ${esc(sectionName(R))}</span></div><div class="tscroll" id="dsum"></div></div>`;
+  <div class="panel"><div class="panel-head"><h2>Selected anchors</h2><span class="hint">${T.label} · your choices for ${esc(sectionName(R))}</span></div><div class="tscroll" id="dsum"></div></div>`;
 
   const q = id => el0.querySelector('#' + id);
+  const zoneChip = z => z === 'ideal' ? '<span class="chip good">✓ Spacing ideal</span>' : z === 'tight' ? '<span class="chip zt">Spacing under 1.5 m</span>' : '<span class="chip zw">Spacing over 2.5 m</span>';
   const update = () => {
-    const uu = U();
-    q('dz-pa').textContent = `${fF(DZ.strandBreak * DZ.ratio, 2)} ${uu.F}`;
+    const uu = U(), t = dzT();
+    q('dz-pa').textContent = t.brk > 0 && t.ratio > 0 ? `${fF(t.brk * t.ratio, 2)} ${uu.F}` : '–';
     const sum = [];
     for (const a of R.struts) {
       const g = gov[a.no]; if (!g) continue;
       const r = rows[a.no], c = dzCalc(R, a, g, r.s, r.n);
       q('dreq-' + a.no).innerHTML = `${fF(c.Hreq, 2)}<span>${uu.Fm} horizontal</span>`;
       q('dreqs-' + a.no).innerHTML = `${fF(c.Tm, 2)} ${uu.Fm} along the anchor · governing stage ${g.stage}${DZ.factor !== 1 ? ` · includes ×${DZ.factor.toFixed(2)}` : ''}`;
+      const lim = `${fF(c.limit, 0)} ${uu.F}`;
+      if (!c.Pa) {
+        q('dout-' + a.no).innerHTML = `<div class="verdict">Enter the polymer ${T.one} data above</div>
+          <div class="keys"><div><span>Force per anchor</span><b class="${c.over ? 'bad' : ''}">${fF(c.T, 2)} ${uu.F}</b></div>
+          <div><span>Max per anchor, service</span><b>${lim}</b></div><div><span>Widest spacing within ${lim}</span><b>${c.sLimit != null ? c.sLimit.toFixed(2) + ' m' : '–'}</b></div></div>`;
+        q('dmx-' + a.no).innerHTML = dzMatrix(R, a, g, r);
+        sum.push(`<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.incl, 0)}°</td><td>${r.s.toFixed(2)}</td><td>–</td><td class="${c.over ? 'bad' : ''}">${fF(c.T, 2)}</td><td>–</td><td>–</td><td>–</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${c.over ? `<span class="chip crit">Over ${lim}</span> ` : ''}${zoneChip(c.zone)}</td></tr>`);
+        continue;
+      }
       const ok = c.util <= 1 + 1e-9;
-      q('dout-' + a.no).innerHTML = `
-        <div class="verdict ${ok ? 'good' : 'crit'}">${ok ? '✓ Carries the consultant’s force' : '✗ Not enough capacity'}</div>
-        <div class="meter${ok ? '' : ' over'}" role="img" aria-label="${Math.round(c.util * 100)}% of capacity used"><i style="width:${Math.min(100, c.util * 100).toFixed(1)}%"></i></div>
+      const verdict = !ok ? `<div class="verdict crit">✗ Not enough capacity</div>`
+        : c.over ? `<div class="verdict crit">✓ Carries the force, but ${fF(c.T, 1)} ${uu.F} is over ${lim} per anchor</div><div class="warnbox">Not recommended to go above ${lim} per anchor in service for ${T.label.toLowerCase()} anchors. Reduce the spacing to ${c.sLimit.toFixed(2)} m or less.</div>`
+        : c.zone === 'ideal' ? `<div class="verdict good">✓ Ideal: carries the force, ${IDEAL_S[0]}–${IDEAL_S[1]} m spacing, within ${lim} per anchor</div>`
+        : `<div class="verdict ${c.zone === 'tight' ? 'zt' : 'zw'}">✓ Carries the force · spacing ${c.zone === 'tight' ? 'under ' + IDEAL_S[0] : 'over ' + IDEAL_S[1]} m (ideal ${IDEAL_S[0]}–${IDEAL_S[1]} m)</div>`;
+      q('dout-' + a.no).innerHTML = `${verdict}
+        <div class="meter${ok && !c.over ? '' : ' over'}" role="img" aria-label="${Math.round(c.util * 100)}% of capacity used"><i style="width:${Math.min(100, c.util * 100).toFixed(1)}%"></i></div>
         <div class="keys">
-          <div><span>Force per anchor</span><b>${fF(c.T, 2)} ${uu.F}</b></div>
+          <div><span>Force per anchor</span><b class="${c.over ? 'bad' : ''}">${fF(c.T, 2)} ${uu.F}${c.over ? ` > ${lim}` : ''}</b></div>
           <div><span>Anchor capacity (${c.n} × ${fF(c.Pa, 2)})</span><b>${fF(c.cap, 2)} ${uu.F}</b></div>
-          <div><span>Capacity used</span><b>${Math.round(c.util * 100)}%</b></div>
+          <div><span>Capacity used</span><b class="${c.over ? 'bad' : ''}">${Math.round(c.util * 100)}%</b></div>
           <div><span>Provided per m, horizontal</span><b class="${ok ? '' : 'bad'}">${fF(c.Hprov, 2)} ${ok ? '≥' : '<'} ${fF(c.Hreq, 2)} ${uu.Fm}</b></div>
-          <div><span>Fewest strands at ${r.s.toFixed(2)} m</span><b>${c.nMin}</b></div>
-          <div><span>Widest spacing with ${c.n} strands</span><b>${c.sMax.toFixed(2)} m</b></div>
+          <div><span>Fewest ${T.many} at ${r.s.toFixed(2)} m</span><b>${c.nMin}</b></div>
+          <div><span>Widest spacing with ${c.n} ${T.many}</span><b>${c.sMax.toFixed(2)} m</b></div>
+          <div><span>Widest spacing within ${lim} per anchor</span><b>${c.sLimit.toFixed(2)} m</b></div>
           ${c.lock != null ? `<div><span>Lock-off load (consultant prestress)</span><b>${fF(c.lock, 1)} ${uu.F} · ${Math.round(c.lock / c.cap * 100)}%</b></div>` : ''}
           ${c.count != null ? `<div><span>Anchors along ${R.options.wallLength} m of wall</span><b>≈ ${c.count}</b></div>` : ''}
         </div>`;
       q('dmx-' + a.no).innerHTML = dzMatrix(R, a, g, r);
-      sum.push(`<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.incl, 0)}°</td><td>${r.s.toFixed(2)}</td><td>${c.n}</td><td>${fF(c.T, 2)}</td><td>${fF(c.cap, 2)}</td><td>${Math.round(c.util * 100)}%</td><td>${fF(c.Hprov, 2)}</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${ok ? '<span class="chip good">✓ OK</span>' : '<span class="chip crit">✗ Increase</span>'}</td></tr>`);
+      const status = (ok ? '<span class="chip good">✓ Capacity</span>' : '<span class="chip crit">✗ Increase</span>') + ' ' + (c.over ? `<span class="chip crit">Over ${lim}</span> ` : '') + zoneChip(c.zone);
+      sum.push(`<tr><td class="l">Strut ${a.no}</td><td>${el(a.elev)}</td><td>${fx(a.incl, 0)}°</td><td>${r.s.toFixed(2)}</td><td>${c.n}</td><td class="${c.over ? 'bad' : ''}">${fF(c.T, 2)}</td><td>${fF(c.cap, 2)}</td><td class="${c.over ? 'bad' : ''}">${Math.round(c.util * 100)}%</td><td>${fF(c.Hprov, 2)}</td><td>${fF(c.Hreq, 2)}</td><td>${c.count ?? '–'}</td><td class="l">${status}</td></tr>`);
     }
-    q('dsum').innerHTML = `<table><thead><tr><th class="l">Row</th><th>Level</th><th>Incl.</th><th>Spacing<small>m</small></th><th>Strands</th><th>Force<small>${uu.F}/anchor</small></th><th>Capacity<small>${uu.F}/anchor</small></th><th>Used</th><th>Provided H<small>${uu.Fm}</small></th><th>Required H<small>${uu.Fm}</small></th><th>Anchors<small>per ${R.options.wallLength ?? '–'} m</small></th><th class="l">Status</th></tr></thead><tbody>${sum.join('')}</tbody></table>`;
+    q('dsum').innerHTML = `<table><thead><tr><th class="l">Row</th><th>Level</th><th>Incl.</th><th>Spacing<small>m</small></th><th>${T.many[0].toUpperCase() + T.many.slice(1)}</th><th>Force<small>${uu.F}/anchor</small></th><th>Capacity<small>${uu.F}/anchor</small></th><th>Used</th><th>Provided H<small>${uu.Fm}</small></th><th>Required H<small>${uu.Fm}</small></th><th>Anchors<small>per ${R.options.wallLength ?? '–'} m</small></th><th class="l">Status</th></tr></thead><tbody>${sum.join('')}</tbody></table>`;
     dzSave(R);
   };
   const setS = (no, v, from) => { if (!(v >= 0.3 && v <= 10)) return; rows[no].s = Math.round(v * 100) / 100; if (from !== 'num') q('ds-' + no).value = rows[no].s.toFixed(2); if (from !== 'range') q('dsr-' + no).value = rows[no].s; update(); };
@@ -1564,11 +1636,13 @@ function renderDesign(el0) {
     q('dn-' + a.no).addEventListener('input', e => setN(a.no, parseFloat(e.target.value), 'num'));
   }
   el0.querySelectorAll('[data-step]').forEach(b => b.onclick = () => { const no = +b.dataset.no, d = +b.dataset.d; if (b.dataset.step === 's') setS(no, rows[no].s + d); else setN(no, rows[no].n + d); });
-  el0.querySelectorAll('[data-min]').forEach(b => b.onclick = () => { const no = +b.dataset.min; const a = R.struts.find(x => x.no === no); setN(no, dzCalc(R, a, gov[no], rows[no].s, null).nMin); });
+  el0.querySelectorAll('[data-min]').forEach(b => b.onclick = () => { const no = +b.dataset.min; const a = R.struts.find(x => x.no === no); const c = dzCalc(R, a, gov[no], rows[no].s, null); if (c && c.nMin) setN(no, c.nMin); });
   el0.addEventListener('click', e => { const b = e.target.closest('[data-mx]'); if (!b) return; const no = +b.dataset.mx; rows[no].s = +b.dataset.s; q('ds-' + no).value = rows[no].s.toFixed(2); q('dsr-' + no).value = rows[no].s; setN(no, +b.dataset.n); });
-  const g = (id, fn) => q(id).addEventListener('input', e => { const v = parseFloat(e.target.value); if (v > 0) { fn(v); update(); } });
-  g('dz-break', v => { DZ.strandBreak = v / U().f; });
-  g('dz-ratio', v => { if (v <= 1) DZ.ratio = v; });
+  el0.querySelectorAll('[data-type]').forEach(b => b.onclick = () => { DZ.type = b.dataset.type; dzSave(R); render(); });
+  const g = (id, fn, needPos = true) => q(id).addEventListener('input', e => { const v = parseFloat(e.target.value); if (v > 0 || !needPos) { fn(v); update(); } });
+  g('dz-break', v => { dzT().brk = v / U().f; });
+  g('dz-ratio', v => { if (v <= 1) dzT().ratio = v; });
+  g('dz-limit', v => { dzT().limit = v / U().f; });
   g('dz-factor', v => { DZ.factor = v; });
   update();
 }
@@ -2038,6 +2112,6 @@ function renderStages(el0) {
 loadText(SAMPLE_TEXT, 'Example report', true);
 </script>
 
-<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-06 08:40 UTC</p>
+<p style="max-width:1240px;margin:0 auto;padding:0 20px 24px;font:12px/1.4 'Public Sans',Arial,sans-serif;color:#76828a">Version 2026-10-25 09:38 UTC</p>
 </body>
 </html>
